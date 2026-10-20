@@ -46,3 +46,5 @@ docs/*
 tests/*acceptance.test.ts
 tests/isolation-u2-u5-fixture.ts
 tests/isolation-business-u2-u5.test.mjs
+
+!docs/BROWSER-CLICK-ISOLATED-ACCEPTANCE-2026-10-20.md

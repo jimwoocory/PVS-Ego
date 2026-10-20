@@ -16,7 +16,9 @@
     "license:archive": "node scripts/archive-licenses.mjs",
     "setup": "node scripts/initialize-isolated.mjs",
     "serve": "node scripts/start-isolated.mjs --serve",
-    "prepare:engines": "node scripts/install-local-engines.mjs"
+    "prepare:engines": "node scripts/install-local-engines.mjs",
+    "prepare:browser-fixture": "node scripts/prepare-browser-click-fixture.mjs",
+    "test:browser": "node scripts/isolation-tools.mjs browser-test"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",

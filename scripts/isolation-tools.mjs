@@ -12,6 +12,7 @@ const compiler = path.join(root, 'node_modules/typescript/bin/tsc');
 const choices = {
   build: [compiler, '-p', path.join(root, 'tsconfig.json')],
   typecheck: [compiler, '--noEmit', '-p', path.join(root, 'tsconfig.json')],
+  'browser-test': ['--test', '--test-concurrency=1', path.join(root, 'tests/browser-click-isolated.test.mjs')],
   test: ['--test', '--test-concurrency=1', path.join(root, 'tests/isolation-boundary-negative.test.mjs')],
   'business-test': ['--test', '--test-concurrency=1', path.join(root, 'tests/isolation-business-u2-u5.test.mjs')]
 };
