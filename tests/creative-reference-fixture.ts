@@ -1,0 +1,42 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import {execFile} from "node:child_process";
+import {promisify} from "node:util";
+import {randomUUID} from "node:crypto";
+import {PrismaClient} from "@prisma/client";
+import {PrismaCreativeReferenceRepository} from "../src/adapters/db/prisma-creative-reference-repository.js";
+import {PrismaProductFlowRepository} from "../src/adapters/db/prisma-product-flow-repository.js";
+import {PrismaArtifactRepository} from "../src/adapters/db/prisma-artifact-repository.js";
+import {LocalArtifactStore} from "../src/adapters/store/local-artifact-store.js";
+import {LocalProductInputStore} from "../src/adapters/store/local-product-input-store.js";
+import {ProductFlowService} from "../src/application/services/product-flow.js";
+import {CreativeReferenceService} from "../src/application/services/creative-reference-service.js";
+import type {CapturedResearchMedia} from "../src/application/ports/creative-reference-repository.js";
+import type {ReferenceAssessment} from "../src/domain/creative-reference.js";
+import type {StructuredAiRequest} from "../src/application/ports/structured-ai-runtime.js";
+import {hashValue} from "../src/domain/hashing.js";
+import {makeProductTruth} from "./fixtures.js";
+const exec=promisify(execFile);
+export const goodAssessment:ReferenceAssessment={identity:"MATCH",identityReason:"Test fixture only: identical declared product",clarity:"CLEAR",watermark:"ABSENT",usage:"PASS",conflictingRuleIds:[],categories:["APPEARANCE","ANGLE"],recommendedRoles:["PRODUCT_ANGLE"],description:"已比对的产品侧面参考",risks:[]};
+export async function referenceFixture(){
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),"pvs-reference-test-")),database="file:"+path.join(root,"fixture.db").replaceAll("\\","/");
+  await exec(process.execPath,[path.resolve("node_modules/prisma/build/index.js"),"migrate","deploy"],{env:{...process.env,DATABASE_URL:database},windowsHide:true,timeout:90000});
+  const db=new PrismaClient({datasources:{db:{url:database}}}),projectId="ref-fixture-"+randomUUID(),runId="research-"+randomUUID(),projectsRoot=path.join(root,"projects");
+  const productFlow=new ProductFlowService(new PrismaProductFlowRepository(db)),artifacts=new PrismaArtifactRepository(db),repo=new PrismaCreativeReferenceRepository(db),productInput=new LocalProductInputStore(projectsRoot,artifacts);
+  const now=new Date().toISOString();await productFlow.createProject({id:projectId,name:"隔离素材池测试",status:"DRAFT",targetPlatform:"douyin",targetDurationMs:15000,aspectRatio:"9:16",createdAt:now,updatedAt:now});
+  const png=path.join(root,"canonical.png");await exec(process.env.FFMPEG_PATH??"ffmpeg",["-hide_banner","-loglevel","error","-f","lavfi","-i","color=c=gray:s=512x512","-frames:v","1","-y",png],{windowsHide:true,timeout:30000});
+  const bytes=await fs.readFile(png),store=new LocalArtifactStore(path.join(projectsRoot,projectId),artifacts);
+  const a=await store.writeImmutable({id:"canonical-"+randomUUID(),projectId,kind:"USER_INPUT",immutable:true,relativePath:"input/canonical.png",mimeType:"image/png",bytes});
+  const asset={id:"canonical-asset",artifactId:a.id,type:"image" as const,source:"user_upload" as const,sha256:a.sha256!,mimeType:"image/png",sizeBytes:bytes.length,width:512,height:512,createdAt:now};
+  const base={...makeProductTruth(),projectId,canonicalImageId:asset.id,referenceImageIds:[asset.id]};
+  const truth={...base,contentHash:hashValue(base)};await productFlow.confirmProductTruth(truth);
+  await productInput.save({projectId,productName:truth.productName,featureDescription:"仅用于测试",assets:[asset],forbiddenChanges:truth.forbiddenChanges});
+  await db.researchRunRecord.create({data:{id:runId,projectId,mode:"DEEP",status:"COMPLETED",goal:"fixture",sourceUrlsJson:"[]",queriesJson:"[]"}});
+  const ai={calls:[] as StructuredAiRequest[],assessment:structuredClone(goodAssessment),fail:false};
+  const runtime={id:"TEST_ONLY",version:"fixture",generateJson:async(request:StructuredAiRequest)=>{ai.calls.push(request);if(ai.fail)throw Error("fixture failure");return structuredClone(ai.assessment)}};
+  const service=new CreativeReferenceService({repo,artifacts,productInput,productFlow,runtime,projectsRoot});
+  const captured:CapturedResearchMedia={projectId,runId,parentSourceUrl:"https://example.com/product",mediaUrl:"https://example.com/product/image.png",title:"Isolated fixture",sourceType:"OFFICIAL",sourceBytes:bytes,sourceMimeType:"image/png",images:[{bytes,mimeType:"image/png"}]};
+  return {root,database,db,projectId,runId,projectsRoot,productFlow,artifacts,repo,productInput,service,runtime,truth,bytes,ai,captured,store,
+    cleanup:async()=>{await db.$disconnect();await fs.rm(root,{recursive:true,force:true})}};
+}

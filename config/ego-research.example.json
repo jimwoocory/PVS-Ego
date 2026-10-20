@@ -1,0 +1,13 @@
+{
+  "contract": "pvs-ego-research-v1",
+  "cliPath": "C:/REPLACE_WITH_EGO_CHECKOUT/package/ego-browser-windows/src/cli.mjs",
+  "cliSha256": "REPLACE_WITH_VERIFIED_CLI_SHA256",
+  "sdkPath": "C:/REPLACE_WITH_EGO_CHECKOUT/package/ego-browser/dist/out/index.js",
+  "sdkSha256": "REPLACE_WITH_VERIFIED_SDK_SHA256",
+  "dataDir": "C:/REPLACE_WITH_DEDICATED_RESEARCH_DATA_DIR",
+  "searchUrlTemplate": "https://www.bing.com/search?q={query}",
+  "allowPrivateNetwork": false,
+  "maxQueries": 3,
+  "maxSources": 6,
+  "settleMs": 1500
+}

@@ -1,0 +1,70 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {referenceFixture} from "./creative-reference-fixture.js";
+import {directorCase,modelRegistry} from "./model-aware-fixtures.js";
+import {AiGenerationService} from "../src/application/services/ai-generation.js";
+import {ProductDirectorService} from "../src/application/services/product-director.js";
+import {HermesProductDirectorGenerator} from "../src/adapters/ai/hermes-product-director-generator.js";
+import {confirmScriptDraft,confirmProductionPlanDraft} from "../src/application/services/review-actions.js";
+import {CreativeReferenceService} from "../src/application/services/creative-reference-service.js";
+import {compileSeedancePrompt} from "../src/application/services/prompt-compiler.js";
+import {GenerationPreflightService} from "../src/application/services/generation-preflight.js";
+import {PrismaGenerationRepository} from "../src/adapters/db/prisma-generation-repository.js";
+import {PrismaWorkflowRepository} from "../src/adapters/db/prisma-workflow-repository.js";
+import {PrismaProductFlowRepository} from "../src/adapters/db/prisma-product-flow-repository.js";
+import {ProductFlowService} from "../src/application/services/product-flow.js";
+import {validateReferenceImagesForPreflight} from "../src/adapters/media/reference-image-validator.js";
+import type {StructuredAiRequest} from "../src/application/ports/structured-ai-runtime.js";
+import type {VideoProvider} from "../src/application/ports/video-provider.js";
+import type {DreaminaAgentCapabilityService} from "../src/application/services/dreamina-agent-capability.js";
+import {H} from "./fixtures.js";
+import {resolveGenerationProfile} from "../src/application/services/dreamina-agent-capability.js";
+
+test("confirmed reference flows through real creative/script/director/compiler/preflight services without creating approvals",{timeout:90000},async()=>{
+ const f=await referenceFixture();try{
+  await f.service.capture(f.captured);const candidate=(await f.repo.candidates(f.projectId))[0]!;
+  const review={expectedRevision:0,expectedTruthHash:f.truth.contentHash,acknowledgeRights:true,changes:[{candidateId:candidate.id,candidateHash:candidate.contentHash,decision:"INCLUDE",role:"PRODUCT_ANGLE"}]};
+  const confirmed=await f.service.review(f.projectId,review),set=confirmed.set!,external=set.entries[0]!,calls:StructuredAiRequest[]=[];
+  const c=directorCase(15000),runtime={id:"FIXTURE_ONLY",version:"1",generateJson:async(r:StructuredAiRequest)=>{
+    calls.push(r);const contract=r.outputContract as Record<string,unknown>,input=r.input as any;
+    if(contract.violations)return {violations:[]};
+    if(contract.concepts)return {concepts:c.input.creativeBatch.concepts};
+    if(contract.beats)return {beats:[{purpose:"PRODUCT",text:"Feature one",estimatedDurationMs:15000,requiredFactIds:["fact-1"]}]};
+    if(contract.scenes){const proposal=structuredClone(c.proposal);for(const scene of proposal.scenes){scene.sourceBeatIds=[input.scriptBeats[0].id];for(const clip of scene.clips){clip.sourceBeatIds=scene.sourceBeatIds;clip.referenceAssets=[{assetId:f.truth.canonicalImageId,role:"PRIMARY_PRODUCT",priority:0,required:true},{assetId:external.assetId,role:"PRODUCT_ANGLE",priority:1,required:true}];for(const segment of clip.segments)segment.sourceBeatIds=scene.sourceBeatIds;}}return proposal;}
+    throw Error("Unexpected contract");
+  }};
+  const flow=new ProductFlowService(new PrismaProductFlowRepository(f.db),f.service),ai=new AiGenerationService(runtime,f.service);
+  const batch=await ai.generateCreativeBatch(f.truth,1,15000);assert.equal(batch.creativeReferenceSetRef!.hash,set.contentHash);
+  await flow.activateCreativeBatch(batch);await flow.selectCreative(f.projectId,batch.concepts[0]!.id);
+  const draft=await ai.generateScriptDraft({truth:f.truth,batch,selectedCreativeId:batch.concepts[0]!.id,version:1,targetDurationMs:15000});
+  const script=confirmScriptDraft(draft);await flow.confirmScript(script);
+  const director=new ProductDirectorService(new HermesProductDirectorGenerator(runtime),runtime,f.service);
+  const plan=confirmProductionPlanDraft(await director.generate({productTruth:f.truth,creativeBatch:batch,selectedCreativeId:script.selectedCreativeId,script,projectTargetDurationMs:15000,generationTarget:c.target}));
+  await flow.confirmProductionPlan(plan);assert.equal(plan.creativeReferenceSetRef!.hash,set.contentHash);
+  const materials=(await f.productInput.latest(f.projectId))!,assets=[...materials.assets,...CreativeReferenceService.assets(set)];
+  const generationProfile=resolveGenerationProfile(c.registry,{operation:"multimodal2video",requestedModelVersion:c.target.requestedModelVersion,aspectRatio:c.target.aspectRatio,videoResolution:c.target.videoResolution,nativeAudioOutputRequested:false,durationMs:15000,referenceAudioInputCount:0});
+  const compiled=compileSeedancePrompt({id:"compiled-fixture",version:1,createdAt:new Date().toISOString(),productTruth:f.truth,creativeBatch:batch,script,productionPlan:plan,clipId:plan.scenes[0]!.clips[0]!.id,assets,creativeReferenceSet:set,generationProfile});
+  assert.match(compiled.promptText,/CONFIRMED_CREATIVE_REFERENCE_SET/);assert.match(compiled.promptText,/PRODUCT_ANGLE/);
+  assert.equal(compiled.inputAssetManifest[1]!.researchReference!.candidateId,candidate.id);
+  assert.equal(compiled.creativeReferenceSetRef!.hash,set.contentHash);
+  const noPrimary=structuredClone(plan);noPrimary.scenes[0]!.clips[0]!.referenceAssets=noPrimary.scenes[0]!.clips[0]!.referenceAssets.filter(a=>a.assetId!==f.truth.canonicalImageId);
+  assert.throws(()=>compileSeedancePrompt({id:"no-primary",version:1,createdAt:new Date().toISOString(),productTruth:f.truth,creativeBatch:batch,script,productionPlan:noPrimary,clipId:noPrimary.scenes[0]!.clips[0]!.id,assets,creativeReferenceSet:set,generationProfile}),/不能替代主图/);
+  const missing={...plan};delete missing.creativeReferenceSetRef;
+  assert.throws(()=>compileSeedancePrompt({id:"bad",version:1,createdAt:new Date().toISOString(),productTruth:f.truth,creativeBatch:batch,script,productionPlan:missing,clipId:plan.scenes[0]!.clips[0]!.id,assets,creativeReferenceSet:set}),/参考集合绑定/);
+  const validated=await validateReferenceImagesForPreflight({projectsRoot:f.projectsRoot,projectId:f.projectId,snapshot:materials,artifacts:f.artifacts,requiredAssetIds:assets.map(a=>a.id),confirmedReferenceAssets:CreativeReferenceService.assets(set)});
+  assert.deepEqual(validated.blockers,[]);
+  const registry=modelRegistry(15);let submits=0;
+  const provider={id:"domestic-jimeng-cli",probe:async()=>({code:"READY",cliFound:true,identityVerified:true,executablePath:"TEST_ONLY",executableSha256:H.a,cliVersion:"test",providerIdentityHash:registry.providerIdentityHash,capabilityFingerprint:registry.providerCapabilityFingerprint,supportedOperations:["submit","status","download"],supportedModels:registry.models,supportedDurationsMs:[15000],rawStdout:"fixture",rawStderr:""}),accountStatus:async()=>({status:"AUTHENTICATED",availableCredits:100}),estimate:async()=>({status:"UNKNOWN",reason:"Test only"}),drainCommandEvidence:()=>[],submit:async()=>{submits++;throw Error("No paid submit allowed")}} as unknown as VideoProvider;
+  const generation=new PrismaGenerationRepository(f.db),workflow=new PrismaWorkflowRepository(f.db);
+  const preflight=new GenerationPreflightService(generation,workflow,provider,(pid,key)=>flow.nextVersion(pid,"CompiledPrompt",key),"seedance2.0mini",runtime,{registry:async()=>registry} as unknown as DreaminaAgentCapabilityService,f.service);
+  const result=await preflight.run({projectId:f.projectId,productTruth:f.truth,creativeBatch:batch,script,productionPlan:plan,assets:materials.assets});
+  assert.equal(result.overallStatus,"PASS");assert.ok(result.requests[0]!.inputVersionRefs.some(r=>r.entityType==="CreativeReferenceSet"&&r.hash===set.contentHash));
+  assert.ok(result.requests[0]!.assetManifest.some(a=>a.assetId===external.assetId&&a.researchReference?.setHash===set.contentHash));assert.equal(submits,0);
+  assert.equal((await generation.listUserApprovals(f.projectId)).length,0);
+  assert.ok(calls.slice(0,3).every(r=>(r.input as any).creativeContext?.references?.contentHash===set.contentHash));
+  await f.service.review(f.projectId,{...review,expectedRevision:1,changes:[{candidateId:candidate.id,candidateHash:candidate.contentHash,decision:"REMOVE"}]});
+  assert.equal((await generation.listCurrentGenerationRequests(f.projectId)).length,0);
+  await assert.rejects(preflight.run({projectId:f.projectId,productTruth:f.truth,creativeBatch:batch,script,productionPlan:plan,assets}),/参考集合已改变/);
+  await assert.rejects(flow.confirmProductionPlan(plan),/参考集合已改变/);
+ }finally{await f.cleanup()}
+});

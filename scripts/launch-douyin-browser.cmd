@@ -1,0 +1,3 @@
+@echo off
+echo ISOLATION_LEGACY_OR_REAL_ENTRY_DISABLED
+exit /b 1

@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Product Video Studio - Douyin Research Bridge",
+  "version": "1.0.1",
+  "description": "Read-only Douyin search bridge for Product Video Studio research.",
+  "permissions": ["tabs"],
+  "host_permissions": [
+    "https://*.douyin.com/*",
+    "http://127.0.0.1:19422/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.douyin.com/*"],
+      "js": ["page-search.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://*.douyin.com/*"],
+      "js": ["bridge-client.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

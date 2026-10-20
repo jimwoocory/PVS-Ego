@@ -1,0 +1,1090 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  researchMediaCandidates ResearchMediaCandidateRecord[]
+  creativeReferenceSets CreativeReferenceSetRecord[]
+  referencePoolHead ReferencePoolHead?
+  referenceReviews ReferenceReviewRecord[]
+  id               String   @id
+  name             String
+  status           String
+  targetPlatform   String   @default("douyin")
+  targetDurationMs Int
+  aspectRatio      String   @default("9:16")
+  currentProductTruthId      String?
+  currentProductTruthVersion Int?
+  currentProductTruthHash    String?
+  currentCreativeBatchId      String?
+  currentCreativeBatchVersion Int?
+  currentCreativeBatchHash    String?
+  selectedCreativeId          String?
+  currentScriptId      String?
+  currentScriptVersion Int?
+  currentScriptHash    String?
+  currentProductionPlanId      String?
+  currentProductionPlanVersion Int?
+  currentProductionPlanHash    String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  versions    VersionedEntity[]
+  artifacts   ArtifactRecord[]
+  blockers    WorkflowBlockerRecord[]
+  requests    GenerationRequestRecord[]
+  preflights  PreflightReportRecord[]
+  approvals   UserApprovalRecord[]
+  attempts    GenerationAttemptRecord[]
+  providerIdentities ProviderIdentityRecord[]
+  providerCapabilities ProviderCapabilityRecord[]
+  commandAttempts CommandAttemptRecord[]
+  reviewDecisions ReviewDecisionRecord[]
+  finalAssemblies FinalAssemblyRecord[]
+  publishAttempts PublishAttemptRecord[]
+  aiPreference ProjectAiPreferenceRecord?
+  aiStepOverrides StepModelOverrideRecord[]
+  aiExecutions AiExecutionRecord[]
+  agentTasks AgentTaskRecord[]
+  smartGenerationRuns SmartGenerationRunRecord[]
+  referenceVideoProfiles ReferenceVideoProfileRecord[]
+  researchRuns ResearchRunRecord[]
+  researchEvidence ResearchEvidenceRecord[]
+  researchBriefs ResearchBriefRecord[]
+  timelines TimelineRecord[]
+  renderJobs RenderJobRecord[]
+  publishPreference PublishPreferenceRecord?
+  publishPackages PublishPackageRecord[]
+  publishReceipts PublishReceiptRecord[]
+  douyinWorkBindings DouyinWorkBindingRecord[]
+  douyinMetricSnapshots DouyinMetricSnapshotRecord[]
+  douyinComments DouyinCommentRecord[]
+  douyinCommentClassifications DouyinCommentClassificationRecord[]
+  douyinReplyDrafts DouyinReplyDraftRecord[]
+  douyinReplyDraftRevisions DouyinReplyDraftRevisionRecord[]
+  douyinInsights DouyinInsightRecord[]
+  douyinCreativeFeedback DouyinCreativeFeedbackRecord[]
+  douyinReplyWriteIntents DouyinReplyWriteIntentRecord[]
+  agentCycles AgentCycleRecord[]
+  douyinCollectionRuns DouyinCollectionRunRecord[]
+}
+
+model AgentCycleRecord {
+  id String @id
+  projectId String
+  requestKey String
+  inputHash String
+  revision Int
+  status String
+  dataJson String
+  leaseOwner String?
+  leasePid Int?
+  createdAt String
+  updatedAt String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  @@unique([projectId, requestKey])
+  @@index([status, updatedAt])
+}
+
+model RenderExecutionRecord {
+  renderJobId String @id
+  projectId String
+  ownerToken String
+  ownerPid Int
+  childPid Int?
+  phase String
+  startedAt DateTime
+  updatedAt DateTime
+  dataJson String
+  @@index([projectId, phase])
+}
+
+model DouyinCollectionRunRecord {
+  id String @id
+  projectId String
+  bindingId String
+  awemeId String
+  parentCid String?
+  requestKey String
+  inputHash String
+  status String
+  revision Int
+  leaseOwner String?
+  leaseExpiresAt DateTime?
+  runJson String
+  createdAt DateTime
+  updatedAt DateTime
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  @@unique([projectId, requestKey])
+  @@index([projectId, createdAt])
+}
+
+model PublishReceiptIdentityRecord {
+  receiptId String @id
+  identityJson String
+  receipt PublishReceiptRecord @relation(fields: [receiptId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+}
+
+model SmartGenerationRunRecord {
+  id               String @id
+  projectId        String
+  requestKey       String
+  activeProjectKey String? @unique
+  status           String
+  revision         Int
+  inputHash        String
+  dataJson         String
+  leaseOwner       String?
+  leasePid         Int?
+  createdAt        String
+  updatedAt        String
+  project          Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  checkpoints      SmartGenerationCheckpointRecord[]
+
+  @@unique([projectId, requestKey])
+  @@index([projectId, createdAt])
+  @@index([status])
+}
+
+model SmartGenerationCheckpointRecord {
+  id          String @id
+  runId       String
+  revision    Int
+  contentHash String
+  dataJson    String
+  createdAt   String
+  run         SmartGenerationRunRecord @relation(fields: [runId], references: [id], onDelete: Restrict)
+
+  @@unique([runId, revision])
+}
+
+model ResearchRunRecord {
+  mediaCandidates ResearchMediaCandidateRecord[]
+  id                 String   @id
+  projectId          String
+  mode               String
+  status             String
+  goal               String
+  sourceUrlsJson     String
+  queriesJson        String
+  browserStateJson   String?
+  blockerCode        String?
+  blockerMessage     String?
+  requiredUserAction String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  project  Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  evidence ResearchEvidenceRecord[]
+  briefs   ResearchBriefRecord[]
+
+  @@index([projectId, createdAt])
+  @@index([projectId, status])
+}
+
+model ResearchEvidenceRecord {
+  id                String   @id
+  projectId         String
+  runId             String
+  sourceUrl         String
+  title             String
+  fetchedAt         DateTime
+  sourceType        String
+  excerpt           String
+  summary           String
+  contentHash       String
+  confidence        String
+  mediaContextJson  String?
+  relatedClaimsJson String
+  status            String   @default("ACTIVE")
+  createdAt         DateTime @default(now())
+
+  project Project           @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  run     ResearchRunRecord @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, runId])
+  @@index([sourceUrl])
+  @@index([contentHash])
+}
+
+model ResearchBriefRecord {
+  id              String   @id
+  projectId       String
+  runId           String
+  status          String
+  summary         String
+  findingsJson    String
+  claimsJson      String
+  usageRulesJson  String   @default("[]")
+  opportunitiesJson String
+  uncertaintiesJson String
+  aiExecutionJson String?
+  contentHash     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project Project           @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  run     ResearchRunRecord @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, runId])
+  @@index([projectId, createdAt])
+}
+
+model ReferenceVideoProfileRecord {
+  id                String   @id
+  projectId         String
+  version           Int
+  status            String
+  sourceType        String
+  sourceUrl         String?
+  videoArtifactId   String
+  videoArtifactHash String
+  contentHash       String
+  dataJson          String
+  createdAt         DateTime
+  updatedAt         DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, version])
+  @@index([projectId, status, version])
+  @@index([videoArtifactId])
+}
+
+model AgentTaskRecord {
+  id                   String   @id
+  projectId            String
+  skillId              String   @default("dreamina-cli")
+  status               String
+  requestText          String
+  requestedMethod      String
+  selectedOperation    String?
+  model                String
+  durationMs           Int
+  aspectRatio          String
+  videoResolution      String
+  nativeAudioOutputRequested Boolean @default(false)
+  materialsJson        String
+  planJson             String?
+  generationRequestId  String?
+  generationAttemptId  String?
+  outputArtifactId     String?
+  acceptedAt           DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, createdAt])
+  @@index([projectId, status])
+}
+
+model AiProviderConfigRecord {
+  id             String   @id
+  name           String
+  baseUrl        String
+  enabled        Boolean  @default(true)
+  configVersion  Int      @default(1)
+  defaultModelId String?
+  timeoutMs      Int      @default(180000)
+  maxRetries     Int      @default(1)
+  hasSecret      Boolean  @default(false)
+  connectionStatus String @default("UNCONFIGURED")
+  lastTestedAt   DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  models AiModelRecord[]
+}
+
+model AiModelRecord {
+  id           String   @id
+  providerId   String
+  modelId      String
+  displayName  String?
+  enabled      Boolean  @default(true)
+  source       String
+  capabilitiesJson String @default("[\"TEXT\"]")
+  discoveredAt DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  provider AiProviderConfigRecord @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, modelId])
+  @@index([providerId, enabled])
+}
+
+model AiSystemPreferenceRecord {
+  id                String   @id
+  defaultProviderId String?
+  defaultModelId    String?
+  updatedAt         DateTime @updatedAt
+}
+
+model ProjectAiPreferenceRecord {
+  projectId          String   @id
+  defaultProviderId  String?
+  defaultModelId     String?
+  updatedAt          DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+}
+
+model StepModelOverrideRecord {
+  id         String   @id
+  projectId  String
+  step       String
+  providerId String
+  modelId    String
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, step])
+  @@index([projectId])
+}
+
+model AiExecutionRecord {
+  id            String   @id
+  projectId     String
+  step          String
+  providerId    String
+  modelId       String
+  configVersion Int
+  runtimeId     String
+  inputHash     String
+  outputHash    String?
+  status        String
+  errorCode     String?
+  createdAt     DateTime
+  completedAt   DateTime?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, step, createdAt])
+  @@index([providerId, modelId])
+}
+
+model VersionedEntity {
+  id          String   @id
+  projectId   String
+  entityType  String
+  entityKey   String
+  version     Int
+  status      String
+  contentHash String
+  dataJson    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, entityType, entityKey, version])
+  @@index([projectId, entityType, status])
+}
+
+model ArtifactRecord {
+  id              String   @id
+  projectId       String
+  kind            String
+  relativePath    String
+  sha256          String?
+  sizeBytes       Int?
+  mimeType        String?
+  integrityStatus String
+  immutable       Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, relativePath])
+  @@index([projectId, integrityStatus])
+}
+
+model WorkflowBlockerRecord {
+  id                 String   @id
+  projectId          String
+  scope              String
+  relatedEntityId    String?
+  reasonCode         String
+  message            String
+  requiredUserAction String
+  resumeCheckpoint   String
+  createdAt          DateTime @default(now())
+  resolvedAt         DateTime?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, resolvedAt])
+}
+
+model GenerationRequestRecord {
+  id                      String   @id
+  projectId               String
+  clipId                  String
+  compiledPromptId        String
+  requestHash             String
+  providerIdentityHash    String
+  capabilityFingerprint   String
+  status                  String   @default("CURRENT")
+  dataJson                String
+  createdAt               DateTime @default(now())
+
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  preflights PreflightReportRecord[]
+  approvals  UserApprovalRecord[]
+  attempts   GenerationAttemptRecord[]
+
+  @@index([projectId, clipId, status])
+  @@unique([projectId, requestHash])
+}
+
+model PreflightReportRecord {
+  id                    String   @id
+  projectId             String
+  generationRequestId   String
+  requestHash           String
+  status                String
+  providerIdentityHash  String
+  capabilityFingerprint String
+  reportHash            String
+  dataJson              String
+  createdAt             DateTime @default(now())
+  staleAt               DateTime?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  request GenerationRequestRecord @relation(fields: [generationRequestId], references: [id], onDelete: Restrict)
+  approvals UserApprovalRecord[]
+  attempts GenerationAttemptRecord[]
+
+  @@index([projectId, status])
+}
+
+model UserApprovalRecord {
+  id                    String   @id
+  projectId             String
+  generationRequestId   String
+  preflightReportId     String
+  requestHash           String
+  preflightHash         String
+  providerIdentityHash  String
+  capabilityFingerprint String
+  status                String
+  approvalHash          String
+  approvedAt            DateTime
+  expiresAt             DateTime?
+  dataJson              String
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  request GenerationRequestRecord @relation(fields: [generationRequestId], references: [id], onDelete: Restrict)
+  preflight PreflightReportRecord @relation(fields: [preflightReportId], references: [id], onDelete: Restrict)
+  attempt GenerationAttemptRecord?
+
+  @@index([projectId, status])
+}
+
+model GenerationAttemptRecord {
+  id                    String   @id
+  projectId             String
+  clipId                String
+  attemptNumber         Int
+  generationRequestId   String
+  requestHash           String
+  preflightReportId     String
+  userApprovalId        String   @unique
+  approvalHash          String
+  submissionFingerprint String
+  status                String
+  externalTaskId        String?
+  providerHandleJson    String?
+  commandAttemptsJson   String
+  outputArtifactId      String?
+  createdAt             DateTime @default(now())
+  submittedAt           DateTime?
+  completedAt           DateTime?
+  errorCode             String?
+  errorMessage          String?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  request GenerationRequestRecord @relation(fields: [generationRequestId], references: [id], onDelete: Restrict)
+  preflight PreflightReportRecord @relation(fields: [preflightReportId], references: [id], onDelete: Restrict)
+  approval UserApprovalRecord @relation(fields: [userApprovalId], references: [id], onDelete: Restrict)
+
+  @@unique([clipId, attemptNumber])
+  @@index([projectId, status])
+}
+
+model ProviderIdentityRecord {
+  id                    String   @id
+  projectId             String
+  provider              String
+  officialSourceUrl     String?
+  publisher             String?
+  packageName           String?
+  executablePath        String
+  executableSha256      String
+  signatureInfo         String?
+  cliVersion            String
+  rawVersionArtifactId  String
+  rawHelpArtifactId     String
+  officialLoginOriginsJson String
+  capabilityFingerprint String
+  verificationStatus    String
+  verifiedAt            DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  capabilities ProviderCapabilityRecord[]
+
+  @@index([projectId, verificationStatus])
+  @@index([executableSha256])
+}
+
+model ProviderCapabilityRecord {
+  id                        String   @id
+  projectId                 String
+  provider                  String
+  providerIdentityId        String?
+  cliFound                  Boolean
+  authenticated             String
+  supportedOperationsJson   String
+  supportedModelsJson       String
+  supportedDurationsMsJson  String?
+  rawProbeArtifactId        String
+  capabilityFingerprint     String
+  probedAt                  DateTime
+  createdAt                 DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  identity ProviderIdentityRecord? @relation(fields: [providerIdentityId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, capabilityFingerprint])
+  @@index([providerIdentityId])
+}
+
+model CommandAttemptRecord {
+  id                    String   @id
+  projectId             String
+  generationAttemptId   String?
+  operation             String
+  attemptNumber         Int
+  startedAt             DateTime
+  completedAt           DateTime?
+  exitCode              Int?
+  signal                String?
+  timedOut              Boolean
+  stdoutArtifactId      String?
+  stderrArtifactId      String?
+  redactionRulesVersion String
+  parserVersion         String
+  errorCode             String?
+  argvRedactedJson      String
+  createdAt             DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, operation])
+  @@index([generationAttemptId])
+}
+
+model ReviewDecisionRecord {
+  id                    String   @id
+  projectId             String
+  clipId                String
+  clipHash              String
+  generationAttemptId   String?
+  outputArtifactId      String?
+  outputArtifactHash    String?
+  decision              String
+  source                String   @default("USER")
+  visualReviewJson      String?
+  note                  String?
+  decidedAt             DateTime
+  createdAt             DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, clipId, decidedAt])
+  @@index([generationAttemptId])
+}
+
+model FinalAssemblyRecord {
+  id                     String   @id
+  projectId              String
+  productionPlanHash     String
+  selectedClipIdsJson    String
+  inputArtifactIdsJson   String
+  inputArtifactHashesJson String
+  outputArtifactId       String
+  outputArtifactHash     String
+  timelineId             String?
+  timelineHash           String?
+  renderJobId            String?
+  renderConfigJson       String?
+  status                 String
+  createdAt              DateTime @default(now())
+  acceptedAt             DateTime?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, createdAt])
+  @@index([projectId, status])
+}
+
+model TimelineRecord {
+  id                 String   @id
+  projectId          String
+  version            Int
+  status             String
+  productionPlanHash String
+  contentHash        String
+  dataJson           String
+  createdAt          DateTime
+  updatedAt          DateTime @updatedAt
+  confirmedAt        DateTime?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, version])
+  @@index([projectId, status, version])
+  @@index([projectId, createdAt])
+  @@index([contentHash])
+}
+
+model RenderJobRecord {
+  id                      String   @id
+  projectId               String
+  timelineId              String
+  timelineHash            String
+  status                  String
+  inputArtifactIdsJson    String
+  inputArtifactHashesJson String
+  renderConfigJson        String
+  outputArtifactId        String?
+  outputArtifactHash      String?
+  errorCode               String?
+  errorMessage            String?
+  createdAt               DateTime
+  startedAt               DateTime?
+  completedAt             DateTime?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, createdAt])
+  @@index([projectId, status])
+  @@index([timelineId, timelineHash])
+}
+
+model PublishPreferenceRecord {
+  projectId    String   @id
+  providerType String
+  updatedAt    DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+}
+
+model PublishPackageRecord {
+  id                    String   @id
+  projectId             String
+  finalAssemblyId       String
+  finalArtifactId       String
+  finalArtifactHash     String
+  providerType          String
+  titleDraft            String
+  descriptionDraft      String?
+  coverArtifactId       String?
+  expiresAt             DateTime
+  singleUseTokenHash    String
+  tokenConsumedAt       DateTime?
+  sessionTokenHash      String?
+  sessionExpiresAt      DateTime?
+  mediaTokenHash        String?
+  mediaExpiresAt        DateTime?
+  status                String
+  handoffReference      String?
+  errorCode             String?
+  errorMessage          String?
+  createdAt             DateTime
+  claimedAt             DateTime?
+  handoffStartedAt      DateTime?
+  completedAt           DateTime?
+  publishedConfirmedAt  DateTime?
+
+  project  Project                @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  receipts PublishReceiptRecord[]
+
+  @@index([projectId, createdAt])
+  @@index([projectId, status])
+  @@index([expiresAt])
+  @@index([singleUseTokenHash])
+}
+
+model PublishReceiptRecord {
+  identity PublishReceiptIdentityRecord?
+  id                String   @id
+  projectId         String
+  packageId         String
+  providerType      String
+  kind              String
+  trusted           Boolean
+  externalReference String?
+  evidenceHash      String?
+  note              String?
+  createdAt         DateTime
+
+  project Project              @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  package PublishPackageRecord @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([packageId, createdAt])
+  @@index([kind, trusted])
+}
+
+model DouyinWorkBindingRecord {
+  id               String   @id
+  projectId        String
+  packageId        String?  @unique
+  opsAccountUid    String?
+  workDescription  String?
+  publishReceiptId String?
+  awemeId          String?  @unique
+  source           String?
+  confidence       String
+  status           String
+  publishedAt      DateTime?
+  boundAt          DateTime?
+  externalUrl      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  snapshots DouyinMetricSnapshotRecord[]
+  comments DouyinCommentRecord[]
+  insights DouyinInsightRecord[]
+
+  @@index([projectId, createdAt])
+  @@index([projectId, status])
+  @@index([awemeId])
+}
+
+model DouyinMetricSnapshotRecord {
+  id          String   @id
+  projectId   String
+  bindingId   String
+  awemeId     String
+  captureKey  String
+  capturedAt  DateTime
+  plays       Int
+  likes       Int
+  comments    Int
+  shares      Int
+  collects    Int?
+  durationMs  Int?
+  rawJson     String
+  contentHash String
+  createdAt   DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  binding DouyinWorkBindingRecord @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, captureKey])
+  @@index([projectId, awemeId, capturedAt])
+  @@index([bindingId, capturedAt])
+  @@index([contentHash])
+}
+
+model DouyinCommentRecord {
+  id                String   @id
+  projectId         String
+  bindingId         String
+  awemeId           String
+  cid               String
+  uid               String?
+  secUid            String?
+  nickname          String
+  text              String
+  diggCount         Int
+  replyCount        Int
+  platformCreatedAt DateTime?
+  parentCid         String?
+  avatarUrl         String?
+  sentiment         String?
+  category          String?
+  priority          String?
+  syncedAt          DateTime
+  rawJson           String
+  contentHash       String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  binding DouyinWorkBindingRecord @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+  classifications DouyinCommentClassificationRecord[]
+  replyDrafts DouyinReplyDraftRecord[]
+
+  @@unique([awemeId, cid])
+  @@index([projectId, awemeId, platformCreatedAt])
+  @@index([bindingId, platformCreatedAt])
+  @@index([parentCid])
+  @@index([contentHash])
+}
+
+model DouyinCommentClassificationRecord {
+  id                String   @id
+  projectId         String
+  commentId         String
+  awemeId           String
+  cid               String
+  sourceContentHash String
+  sentiment         String
+  category          String
+  priority          String
+  rationale         String?
+  runtimeId         String
+  runtimeVersion    String
+  providerId        String?
+  modelId           String?
+  executionId       String?
+  configVersion     Int?
+  classifiedAt      DateTime
+  createdAt         DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  comment DouyinCommentRecord @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, awemeId, classifiedAt])
+  @@index([commentId, classifiedAt])
+  @@index([cid, classifiedAt])
+  @@index([sourceContentHash])
+}
+
+model DouyinReplyDraftRecord {
+  id                String   @id
+  projectId         String
+  commentId         String
+  awemeId           String
+  cid               String
+  sourceContentHash String
+  classificationId  String?
+  productTruthHash  String
+  usedFactIdsJson   String
+  generatedText     String
+  currentText       String
+  strategy          String
+  status            String
+  revision          Int      @default(1)
+  runtimeId         String
+  runtimeVersion    String
+  providerId        String?
+  modelId           String?
+  executionId       String?
+  configVersion     Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  comment DouyinCommentRecord @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  revisions DouyinReplyDraftRevisionRecord[]
+  writeIntents DouyinReplyWriteIntentRecord[]
+
+  @@index([projectId, awemeId, createdAt])
+  @@index([commentId, createdAt])
+  @@index([cid, createdAt])
+  @@index([sourceContentHash])
+  @@index([productTruthHash])
+}
+
+model DouyinReplyDraftRevisionRecord {
+  id                String   @id
+  projectId         String
+  draftId           String
+  commentId         String
+  action            String
+  beforeText        String
+  afterText         String
+  beforeStatus      String
+  afterStatus       String
+  expectedRevision  Int
+  resultingRevision Int
+  createdAt         DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  draft DouyinReplyDraftRecord @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, draftId, createdAt])
+  @@index([commentId, createdAt])
+}
+
+model DouyinInsightRecord {
+  id                      String   @id
+  projectId               String
+  bindingId               String
+  awemeId                 String
+  productTruthHash        String
+  metricSnapshotIdsJson   String
+  commentIdsJson          String
+  evidenceHash            String
+  summary                 String
+  strengthsJson           String
+  weaknessesJson          String
+  audienceQuestionsJson   String
+  nextCreativeActionsJson String
+  runtimeId               String
+  runtimeVersion          String
+  providerId              String?
+  modelId                 String?
+  executionId             String?
+  configVersion           Int?
+  createdAt               DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  binding DouyinWorkBindingRecord @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+  creativeFeedback DouyinCreativeFeedbackRecord[]
+
+  @@index([projectId, awemeId, createdAt])
+  @@index([bindingId, createdAt])
+  @@index([evidenceHash])
+}
+
+model DouyinCreativeFeedbackRecord {
+  id               String   @id
+  projectId        String
+  insightId        String
+  actionIndex      Int
+  actionHash       String
+  actionText       String
+  evidenceRefsJson String
+  active           Boolean  @default(true)
+  confirmedAt      DateTime
+  deactivatedAt    DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  insight DouyinInsightRecord @relation(fields: [insightId], references: [id], onDelete: Cascade)
+
+  @@unique([insightId, actionHash])
+  @@index([projectId, active, confirmedAt])
+  @@index([insightId, actionIndex])
+}
+
+model DouyinReplyWriteIntentRecord {
+  id                   String   @id
+  projectId            String
+  draftId              String
+  commentId            String
+  awemeId              String
+  cid                  String
+  textHash             String
+  operationFingerprint String   @unique
+  draftRevision        Int
+  status               String
+  externalReplyCid     String?
+  accountPublishId     String
+  accountOpsId         String
+  confirmedAt          DateTime
+  completedAt          DateTime?
+  message              String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  draft DouyinReplyDraftRecord @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, awemeId, createdAt])
+  @@index([draftId, createdAt])
+  @@index([commentId, createdAt])
+  @@index([status])
+}
+
+model ResearchMediaCandidateRecord {
+  id String @id
+  projectId String
+  runId String
+  captureKey String
+  contentHash String
+  dataJson String
+  createdAt String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  run ResearchRunRecord @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([projectId, captureKey], map: "ResearchMediaCandidateRecord_capture_key")
+  @@index([projectId, createdAt], map: "ResearchMediaCandidateRecord_project")
+}
+
+model CreativeReferenceSetRecord {
+  id String @id
+  projectId String
+  version Int
+  contentHash String
+  dataJson String
+  createdAt String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  heads ReferencePoolHead[]
+  @@unique([projectId, version], map: "CreativeReferenceSetRecord_version")
+}
+
+model ReferencePoolHead {
+  projectId String @id
+  revision Int @default(0)
+  setId String?
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  set CreativeReferenceSetRecord? @relation(fields: [setId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+}
+
+model ReferenceReviewRecord {
+  id String @id
+  projectId String
+  revision Int
+  dataJson String
+  createdAt String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([projectId, revision], map: "ReferenceReviewRecord_revision")
+}
+
+model DouyinOperationsScheduleRecord {
+  id String @id
+  projectId String
+  requestKey String
+  inputHash String
+  status String
+  revision Int
+  nextAt DateTime
+  leaseOwner String?
+  leaseExpiresAt DateTime?
+  dataJson String
+  createdAt DateTime
+  updatedAt DateTime
+  @@unique([projectId, requestKey])
+  @@index([status, nextAt])
+}
+
+model PublishAttemptRecord {
+  id               String   @id
+  projectId        String
+  finalAssemblyId  String
+  platform         String
+  status           String
+  title            String
+  description      String?
+  externalVideoId  String?
+  externalItemId   String?
+  errorCode        String?
+  errorMessage     String?
+  createdAt        DateTime @default(now())
+  confirmedAt      DateTime?
+  completedAt      DateTime?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, createdAt])
+  @@index([projectId, status])
+}
