@@ -79,8 +79,9 @@ export function startSmartGenerationWorker(service: SmartGenerationService, opti
         if (stopped) break;
         // Reading the task index never grants execution permission to old runs.
         if (!canWorkerAdvanceRun(policy, original.projectId, original.id, original.autoAdvanceGrant)) continue;
-        if (policy.mode === "MANAGED") {
-          // Only a specifically granted run's provably dead lease can be recovered.
+        if (policy.mode === "MANAGED" || policy.mode === "ALL") {
+          // Owners can die after startup. Recheck only a run this policy may
+          // advance; the service leaves every live or unknown OS owner intact.
           await service.recoverAbandonedScoped(original.projectId, original.id);
         }
         if (stopped) break;

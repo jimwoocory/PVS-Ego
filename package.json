@@ -34,7 +34,8 @@
     "test:pr1-go-receipt": "node scripts/run-pr1-go-receipt.mjs",
     "test:pr1-worker-lifecycle": "node scripts/run-pr1-worker-lifecycle.mjs",
     "test:pr1-final-review": "node scripts/run-pr1-final-review.mjs",
-    "test:pr1-metrics-integration": "node scripts/run-pr1-metrics-integration.mjs"
+    "test:pr1-metrics-integration": "node scripts/run-pr1-metrics-integration.mjs",
+    "test:pr1-worker-db": "node scripts/run-pr1-worker-db.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",

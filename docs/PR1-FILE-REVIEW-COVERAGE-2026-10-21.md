@@ -1,8 +1,8 @@
 # PR #1 逐文件审查覆盖清单
 
-审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录替代文件**。C1 新增 3 项后为116项；C2 再增3项，当前范围为 **119 项**。新增项在末表单独列出，已修改的原文件仍计入原113项。
+审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录代替文件**。C1 新增3项、C2新增3项、C3新增3项，当前范围为 **122 项**。新增项在末表单独列出，已修改的原文件仍计入原113项。
 
-这是指定深度的静态审查与证据索引，**不是119个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。原生 Go/worker 前轮修复结合未变源码与其当时证据复核。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
+这是指定深度的静态审查与证据索引，**不是122个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。原生Go前轮修复结合未变源码与当时证据复核；worker当前运行以C3为准。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
 
 ## C1 前轮补漏与限定运行证据
 
@@ -23,6 +23,20 @@
 初轮23/23后发现F4，构建成功后只复跑同一专项；最终新空库23/23包含上述工作台检查，两个应用进程及原生浏览器任务正常收尾。截图失败保留在初轮证据中，最终轮没有重复尝试截图；两轮不累计通过数。
 
 本轮无真实 Go/SDK/宿主或平台调用、模型推理、素材外发、付费生成、上传/发布/回复。C1及H历史专项均未重跑；C2只证明上述共享指标切片，其他业务路径、长期worker和真实平台缺口保持。模型 aihubmix/deepseek-v4.1-flash，音频 NOT_OBSERVED、费用 UNKNOWN。
+
+## C3 worker 多执行器与实际数据库专项
+
+以 `44b01c5` 为起点，构建退出0，本轮唯一套件 `npm run test:pr1-worker-db` 最终 **16/16（15子项加父项）、退出0**。使用迁移新建的空白SQLite、实际Prisma仓库和原运营计划/Agent/智能制作服务与worker，原生定时器及多个独立进程。7个应用进程全部观察到退出：5个正常退出0，2个故障注入按预期退出73。
+
+- **F5 / P2 已修复**：ALL智能制作worker只在启动时清理死亡进程租约，其他执行器在其启动后退出会使任务持续被锁住。现在每轮仅对当前策略允许推进的具体任务检查死亡租约；活进程及状态未知的拥有者保持不动。默认禁用策略、MANAGED授权、精确SCOPED范围和人工门禁未扩大。
+- 检查双worker领取不重复、跨多个定时轮次的慢读取、人工暂停后旧响应拒写、原180秒租约自然到期后旧响应拒写、读取意图保存后实际进程退出且不重放、认证暂停不自动重试、Agent单次保存读取与未确认人工动作、ALL启动后的死亡租约与活拥有者、MANAGED/SCOPED隔离、停止后无后续扫描及实际worker进程重启。
+- 运营计划按原60秒间隔完成两次观察，达到原次数上限后保持终态。慢响应跨180秒到期测试不修改TTL或数据库到期时间；另一个崩溃恢复案例显式注入到期时间，不能把它当作第二次自然到期证明。
+- 观察和制作来源检查均为固定本地函数；制作在真实服务的人工审阅状态暂停。未调用模型、平台、Go/SDK/宿主、HTTP或浏览器，没有付费生成或真实建议采用。新库无模型provider、execution或生成attempt记录。
+- 原定时器单元测试的一条ALL预期已对齐新增逐任务检查；该旧套件及C1/C2/H历史专项本轮均未运行。首个普通沙箱spawn EPERM单独保留，随后以正常Windows权限运行相同守卫命令；短轮16/16后只复跑同一套件补自然到期，不累计通过数。
+
+最终原生worker观察窗口 **243107ms**；自然到期慢响应等待 **180362ms** 后被另一执行器接续，未改时钟、TTL或到期列；两次原计划指标读取相隔 **65108ms**。预期租约竞争拒绝记录保留，未发现其他worker错误，单进程运营tick最大并发1。全套含启动/收尾约245秒；这些数值不表示所有worker全程没有停止/重启，停止和重启本身也是用例。
+
+数分钟有界运行只证明上述调度、实际数据库竞争和恢复切片，仍缺小时/天级浸泡、大量任务公平性、生产负载、网络/磁盘故障与真实执行端取消等证据；stop只阻止后续调度，不强制取消当前一步。原模型及隔离守卫保持，音频NOT_OBSERVED、费用UNKNOWN。
 
 ## 历史证据索引
 
@@ -79,12 +93,12 @@
 | 030 | [scripts/run-u4-schedule-durability.mjs](../scripts/run-u4-schedule-durability.mjs) | 运行器静态 | 新空库/实际进程故障、租约与 U5 冻结链，固定读取响应；会话/env/参数/子进程退出/最终回执 | H8 |
 | 031 | [scripts/run-u45-workbench-review.mjs](../scripts/run-u45-workbench-review.mjs) | 运行器静态 | 原工作台只读证据与具体续接；固定数据、HTTP/点击分层；会话/env/参数/子进程退出/最终回执 | H9 |
 | 032 | [src/adapters/ai/hermes-product-director-generator.ts](../src/adapters/ai/hermes-product-director-generator.ts) | 差异/关键调用链 | 参考快照冻结；模型请求前后核验；注入验证器 | H7 |
-| 033 | [src/adapters/db/operations-write-fence.ts](../src/adapters/db/operations-write-fence.ts) | 差异/关键调用链 | 进程内写入权限类型与事务内租约/截止时间护栏 | H8 |
+| 033 | [src/adapters/db/operations-write-fence.ts](../src/adapters/db/operations-write-fence.ts) | 差异/关键调用链及实际DB | 进程内写入权限类型与事务内租约/截止时间护栏 | H8；C3暂停/自然到期后拒写 |
 | 034 | [src/adapters/db/prisma-artifact-repository.ts](../src/adapters/db/prisma-artifact-repository.ts) | 差异/关键调用链 | 不可变属性拒绝，保存证据读取调用方 | H7,H11 |
 | 035 | [src/adapters/db/prisma-browser-publish-checkpoints.ts](../src/adapters/db/prisma-browser-publish-checkpoints.ts) | 差异/关键调用链 | 版本 CAS、原成片双占位、事务与历史检查点完整性 | H6 |
-| 036 | [src/adapters/db/prisma-douyin-collection-repository.ts](../src/adapters/db/prisma-douyin-collection-repository.ts) | 差异/关键调用链 | 按原请求查询；人工续接版本/租约约束 | H8,H10 |
-| 037 | [src/adapters/db/prisma-douyin-operations-schedule-repository.ts](../src/adapters/db/prisma-douyin-operations-schedule-repository.ts) | 差异/关键调用链 | 数据库行与 JSON 范围一致；父子单事务续接及租约 | H8,H9,H10 |
-| 038 | [src/adapters/db/prisma-douyin-ops-repository.ts](../src/adapters/db/prisma-douyin-ops-repository.ts) | 差异/关键调用链及实际DB | 保存事务写护栏；F3普通/部分指标统一读取核验 | H8；C2指标读取/列表/写入返回 |
+| 036 | [src/adapters/db/prisma-douyin-collection-repository.ts](../src/adapters/db/prisma-douyin-collection-repository.ts) | 差异/关键调用链及实际DB | 按原请求查询；人工续接版本/租约约束 | H8,H10；C3固定空评论页保存，不含全部分页竞争 |
+| 037 | [src/adapters/db/prisma-douyin-operations-schedule-repository.ts](../src/adapters/db/prisma-douyin-operations-schedule-repository.ts) | 差异/关键调用链及实际多进程 | 数据库行与 JSON 范围一致；父子单事务续接及租约 | H8,H9,H10；C3领取/暂停/自然到期/旧拥有者 |
+| 038 | [src/adapters/db/prisma-douyin-ops-repository.ts](../src/adapters/db/prisma-douyin-ops-repository.ts) | 差异/关键调用链及实际DB | 保存事务写护栏；F3普通/部分指标统一读取核验 | H8；C2指标读取/列表/写入返回；C3部分指标拒绝过期写入 |
 | 039 | [src/adapters/db/prisma-product-flow-repository.ts](../src/adapters/db/prisma-product-flow-repository.ts) | 差异/关键调用链 | 保存版本 ID/项目/版本/内容哈希核验 | H9 |
 | 040 | [src/adapters/db/prisma-reference-video-repository.ts](../src/adapters/db/prisma-reference-video-repository.ts) | 差异/关键调用链 | 活动/过期分析记录与内容绑定；v3 摘要 | H7 |
 | 041 | [src/adapters/publish/ego-staged-publisher-runtime.ts](../src/adapters/publish/ego-staged-publisher-runtime.ts) | 差异/关键调用链 | 候选本机网址、显式端口和原服务保护端口限制 | H6 |
@@ -101,13 +115,13 @@
 | 052 | [src/application/ports/product-flow-repository.ts](../src/application/ports/product-flow-repository.ts) | 差异/关键调用链 | 只读核验历史版本端口，不引入写入副作用 | H9 |
 | 053 | [src/application/ports/research-provider.ts](../src/application/ports/research-provider.ts) | 差异/关键调用链 | 冻结正文/图片文件摘要与旧回执兼容边界 | H11 |
 | 054 | [src/application/ports/research-repository.ts](../src/application/ports/research-repository.ts) | 差异/关键调用链 | 持久化 collectionOnly 仅减少工作，不恢复模型许可 | H4,H12 |
-| 055 | [src/application/services/agent-cycle-service.ts](../src/application/services/agent-cycle-service.ts) | 差异/关键调用链 | 本机进度保存、活租约内取消、旧句柄恢复为未知/阻断 | H1,H2,H13 |
+| 055 | [src/application/services/agent-cycle-service.ts](../src/application/services/agent-cycle-service.ts) | 差异/关键调用链及实际worker | 本机进度保存、活租约内取消、旧句柄恢复为未知/阻断 | H1,H2,H13；C3双worker单次保存读取与未确认门禁 |
 | 056 | [src/application/services/ai-generation.ts](../src/application/services/ai-generation.ts) | 差异/关键调用链 | 参考证据与采用反馈在初次/纠错/使用规则请求前后核验 | H7,H8 |
 | 057 | [src/application/services/browser-publish-preparation-service.ts](../src/application/services/browser-publish-preparation-service.ts) | 差异/关键调用链 | 原账号/scopeHash/最新版本确认，接管归还分阶段 | H6 |
 | 058 | [src/application/services/douyin-collection-service.ts](../src/application/services/douyin-collection-service.ts) | 差异/关键调用链 | 原账号/游标续接；读取与保存前护栏传递 | H8,H10 |
 | 059 | [src/application/services/douyin-comment-service.ts](../src/application/services/douyin-comment-service.ts) | 差异/关键调用链 | 异步账号校验后再检查读护栏，事务保存传递 | H8 |
-| 060 | [src/application/services/douyin-metric-service.ts](../src/application/services/douyin-metric-service.ts) | 差异/关键调用链 | 指标缺项不补零；读取/保存护栏与原 captureKey | H8 |
-| 061 | [src/application/services/douyin-operations-schedule-service.ts](../src/application/services/douyin-operations-schedule-service.ts) | 差异/关键调用链 | 未知读取意图、预算/期限、原父子续接；F1 已修复 | H8,H10；C1负例；C2实际步骤/重启/保存意图 |
+| 060 | [src/application/services/douyin-metric-service.ts](../src/application/services/douyin-metric-service.ts) | 差异/关键调用链及实际worker | 指标缺项不补零；读取/保存护栏与原 captureKey | H8；C3固定读取、暂停/到期拒写 |
+| 061 | [src/application/services/douyin-operations-schedule-service.ts](../src/application/services/douyin-operations-schedule-service.ts) | 差异/关键调用链及原生worker | 未知读取意图、预算/期限、原父子续接；F1 已修复 | H8,H10；C1负例；C2实际步骤/重启/保存意图；C3双进程/自然TTL/实际重启 |
 | 062 | [src/application/services/douyin-read-evidence-audit.ts](../src/application/services/douyin-read-evidence-audit.ts) | 差异/关键调用链 | 评论原文对照；保存指标原文/数值/可见性/账号核验 | H7；C1、C2仅保存指标相关路径 |
 | 063 | [src/application/services/douyin-retrospective-service.ts](../src/application/services/douyin-retrospective-service.ts) | 差异/关键调用链 | 冻结原始指标/评论真实性和原账号；F1 已修复 | H8；C1拒绝；C2实际规则整理与负例，非模型 |
 | 064 | [src/application/services/operations-evidence-reader.ts](../src/application/services/operations-evidence-reader.ts) | 差异/关键调用链 | 只读计划、指标、原候选输入和历史反馈；F1 已修复 | H9,H10；C1；C2指标HTTP/HTML，非候选全链 |
@@ -119,7 +133,7 @@
 | 070 | [src/application/services/research-evidence-reader.ts](../src/application/services/research-evidence-reader.ts) | 差异/关键调用链 | 原研究归属、正文回执和保存文件；截图不宣称已验证 | H2,H3,H11 |
 | 071 | [src/application/services/research-service.ts](../src/application/services/research-service.ts) | 差异/关键调用链 | 明确仅采集模式、阻断摘要；续接识别冻结原始重定向来源 | H2,H4,H12 |
 | 072 | [src/application/services/saved-research-artifact.ts](../src/application/services/saved-research-artifact.ts) | 差异/关键调用链 | 大小上限、原研究目录、链接/稳定性/文件摘要共用核验 | H11 |
-| 073 | [src/application/services/smart-generation-worker.ts](../src/application/services/smart-generation-worker.ts) | 差异/关键调用链 | 恢复与推进串行、精确死租约、停止/禁用边界 | H13 |
+| 073 | [src/application/services/smart-generation-worker.ts](../src/application/services/smart-generation-worker.ts) | 差异/关键调用链及原生定时器/DB | 恢复与推进串行、F5启动后死亡租约检查、停止/授权范围 | H13历史；C3实际进程竞争/死亡/活拥有者/范围 |
 | 074 | [src/domain/agent-cycle.ts](../src/domain/agent-cycle.ts) | 差异/关键调用链 | 本机执行反馈字段，不替代业务状态与授权 | H1,H2 |
 | 075 | [src/domain/douyin-feedback-validation.ts](../src/domain/douyin-feedback-validation.ts) | 差异/关键调用链 | 冻结来源、原始 ID、时间窗、覆盖计数与引用一致 | H7,H8 |
 | 076 | [src/domain/douyin-operations-schedule.ts](../src/domain/douyin-operations-schedule.ts) | 差异/关键调用链 | 读取意图协议、历史次数/检查点/父评论上限 | H8,H10 |
@@ -149,7 +163,7 @@
 | 100 | [tests/pr1-research-cache-isolated.test.mjs](../tests/pr1-research-cache-isolated.test.mjs) | 结构/边界/证据声明 | 缓存完整性、损坏元数据、原只读 HTTP 与固定采集端 | H11 |
 | 101 | [tests/pr1-resume-atomic-fixture.ts](../tests/pr1-resume-atomic-fixture.ts) | 结构/边界/证据声明 | 原父子版本/范围/租约冲突与真实事务回滚夹具 | H10 |
 | 102 | [tests/pr1-resume-atomic-isolated.test.mjs](../tests/pr1-resume-atomic-isolated.test.mjs) | 结构/边界/证据声明 | 原父子版本/范围/租约冲突与真实事务回滚夹具 | H10 |
-| 103 | [tests/pr1-worker-lifecycle.test.ts](../tests/pr1-worker-lifecycle.test.ts) | 结构/边界/证据声明 | 本机继承管道/取消/超时与 worker 定时器；合成进程退出证据 | H13 |
+| 103 | [tests/pr1-worker-lifecycle.test.ts](../tests/pr1-worker-lifecycle.test.ts) | 结构/边界/预期对齐，未运行 | ALL预期对齐F5逐任务检查；旧定时器案例本轮未执行 | H13历史，不称当前运行通过 |
 | 104 | [tests/research-evidence-review-fixture.ts](../tests/research-evidence-review-fixture.ts) | 结构/边界/证据声明 | 原只读 HTTP、保存证据和浏览器分层；不触发新采集 | H3 |
 | 105 | [tests/research-evidence-review-isolated.test.mjs](../tests/research-evidence-review-isolated.test.mjs) | 结构/边界/证据声明 | 原只读 HTTP、保存证据和浏览器分层；不触发新采集 | H3 |
 | 106 | [tests/u2-evidence-integrity-fixture.ts](../tests/u2-evidence-integrity-fixture.ts) | 结构/边界/证据声明 | 新合成媒体、采样时间戳、文件/下游失效；固定语义响应 | H7 |
@@ -177,12 +191,20 @@
 | N5 | [tests/pr1-metrics-integration-fixture.ts](../tests/pr1-metrics-integration-fixture.ts) | 本轮源码/实际DB与HTTP | 原Prisma/服务/路由、固定读取、数据篡改及应用重启 | C2 |
 | N6 | [tests/pr1-metrics-integration-isolated.test.mjs](../tests/pr1-metrics-integration-isolated.test.mjs) | 本轮实际执行 | 新空库、HTTP断言、浏览器交互与后端状态交叉核验 | C2；截图BLOCKED |
 
+## C3 新增 3 项
+
+| 编号 | 文件 | 复核深度 | 审查焦点与结果 | 关联运行证据 |
+| --- | --- | --- | --- | --- |
+| N7 | [scripts/run-pr1-worker-db.mjs](../scripts/run-pr1-worker-db.mjs) | 本轮运行器静态/实际退出 | 新会话、净化env、原守卫、单专项、子进程实际退出与最终回执 | C3 |
+| N8 | [tests/pr1-worker-db-fixture.ts](../tests/pr1-worker-db-fixture.ts) | 本轮源码/实际Prisma与worker | 原服务/原生定时器、固定观察、暂停/到期/退出故障 | C3 |
+| N9 | [tests/pr1-worker-db-isolated.test.mjs](../tests/pr1-worker-db-isolated.test.mjs) | 本轮实际执行 | 共享新空库、多进程竞争、自然TTL、确认门禁和退出核验 | C3 |
+
 ## 明确剩余未验收项
 
 | 编号 | 尚缺证据 | 当前边界与下一步 |
 | --- | --- | --- |
 | R1 | 实际配置入口、Node/Ego CLI/SDK/宿主的取消/超时与异常断连 | H13 只回收直接工作进程，后代/宿主动作可能仍存在；remoteActionsRolledBack=false，不自动终止其他 Space 或恢复旧许可 |
-| R2 | 常驻 worker 浸泡、多执行器与实际 DB 组合运行 | C2有原计划步骤/租约查询及应用重启；未启动常驻worker、多执行器或长期浸泡。H13仍仅确定性计时器，stop不强制取消当前一步 |
+| R2 | 小时/天级worker浸泡、大量任务公平性、生产负载及I/O故障 | C3补有界原生定时器/多进程/实际共享Prisma、自然180秒到期、单次领取及实际重启；不扩称长期生产浸泡，stop不强制取消当前一步 |
 | R3 | 共享指标之外的当前组合回归及截图视觉 | C2已完成指标切片的实际Prisma/HTTP/原生交互23项；截图执行截止仍BLOCKED，其他H8/H9/H10等路径未重跑，不扩称全部U1–U5或全路径通过 |
 | R4 | U1 真人登录/验证码后归还原会话 | 固定自有页成功不证明真人归还；账号与实际验证由用户处理，旧句柄/权限不自动恢复 |
 | R5 | U2 实际模型推理、媒体外发、音频与费用 | 模型保持 aihubmix/deepseek-v4.1-flash；音频 NOT_OBSERVED、费用 UNKNOWN，不自动发素材/调用模型/计费或切模型 |

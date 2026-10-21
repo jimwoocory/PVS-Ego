@@ -49,7 +49,7 @@ test("global startup recovery blocks intervals, retries failure and runs once af
   t.mock.timers.tick(2000);await flush();assert.equal(recoveries,1);assert.deepEqual(calls,[]);
   gate.resolve();await flush();assert.equal(errors.length,1);assert.deepEqual(calls,[]);
   t.mock.timers.tick(1000);await flush();t.mock.timers.tick(1000);await flush();
-  assert.equal(recoveries,2);assert.deepEqual(calls,["list","advance","list","advance"]);
+  assert.equal(recoveries,2);assert.deepEqual(calls,["list","recover","advance","list","recover","advance"]);
 });
 test("stop during scoped recovery prevents task reads and advancement",async t=>{
   t.mock.timers.enable({apis:["setInterval"]});const gate=deferred();const {api,calls}=service({async recoverAbandonedScoped(){await gate.promise;return true;}});
