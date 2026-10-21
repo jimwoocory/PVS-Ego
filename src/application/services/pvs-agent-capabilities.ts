@@ -45,6 +45,7 @@ import { assertCurrentQuote } from "./production-quote-service.js";
 export type PvsAgentCapabilityDependencies = {
   productFlow: ProductFlowService; productRepo: ProductFlowRepository; productInput: ProductInputStore;
   research: ResearchService; researchRepo: ResearchRepository; aiGeneration: AiGenerationService;
+  collectEgoLiteEvidence?: (context:AgentCapabilityContext,input:{goal:string;sourceUrls:Array<{url:string;sourceType:"USER_URL"}>})=>Promise<Awaited<ReturnType<ResearchService["startRun"]>>>;
   smartGeneration: SmartGenerationService; referenceVideo: ReferenceVideoAnalysisService;
   finalOutput: FinalOutputRepository; finalAssembly: FinalAssemblyService; finalQc: FinalQcService; review: ReviewService;
   publishBridge: PublishBridgeService; publishRepo: PublishRepository;
@@ -65,6 +66,16 @@ const empty = z.object({}).strict();
 const runInput = z.object({ runId: id }).strict();
 const runStepInput = z.object({ runId: id, expectedRevision: z.number().int().positive() }).strict();
 const source = z.enum(["OFFICIAL", "USER_URL", "PUBLIC_PRODUCT", "COMPETITOR", "INDUSTRY", "TREND", "PLATFORM"]);
+function assertOwnedEgoLiteSources(baseUrl: string, sources: Array<{ url: string; sourceType: string }>) {
+  const base = new URL(baseUrl);
+  if (base.protocol !== "http:" || base.hostname !== "127.0.0.1" || !base.port) throw new DomainValidationError("Ego Lite 本机来源尚未配置");
+  for (const item of sources) {
+    const url = new URL(item.url);
+    if (item.sourceType !== "USER_URL" || url.origin !== base.origin || url.username || url.password || url.search || url.hash ||
+        !/^\/bridge-fixture\/[A-Za-z0-9-]{1,80}$/.test(url.pathname))
+      throw new DomainValidationError("当前仅允许明确绑定的本机合成来源");
+  }
+}
 const receiptSchema = z.object({
   projectId: id, cycleId: id, actionId: id, kind: z.string(), createdAt: z.string(), payload: z.record(z.string(), z.unknown())
 }).strict();
@@ -221,6 +232,15 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
         return answer("产品事实已确认", confirmed); } });
     this.add({ id: "research.inspect", title: "查看行业视频研究", description: "读取本项目已保存研究与候选视频，未实际搜索。", stage: "RESEARCH", effect: "READ", inputSchema: empty,
       run: async c => answer("已保存研究", await this.d.research.pageData(c.projectId)) });
+    this.add({ id: "research.collect-evidence", title: "只读采集本机合成来源", description: "经具体来源确认后仅保存本机合成页面证据；不搜索、不生成摘要、不调用模型。", stage: "RESEARCH", effect: "HUMAN_DECISION",
+      inputSchema: z.object({ goal: z.string().trim().min(3).max(3000), sourceUrls: z.array(z.object({ url: z.string().url(), sourceType: source }).strict()).min(1).max(6) }).strict(),
+      preview: async (_projectId, input) => { assertOwnedEgoLiteSources(this.d.publicBaseUrl, input.sourceUrls); return JSON.stringify({ goal: input.goal, sourceUrls: input.sourceUrls, operation: "仅采集来源证据，不运行搜索或模型" }, null, 2); },
+      run: async (context, input) => {
+        assertOwnedEgoLiteSources(this.d.publicBaseUrl, input.sourceUrls);
+        if(!this.d.collectEgoLiteEvidence)throw new DomainValidationError("Ego Lite 本机执行器尚未接入，未开始采集");
+        const result = await this.d.collectEgoLiteEvidence(context,{goal:input.goal,sourceUrls:input.sourceUrls.map(item=>({url:item.url,sourceType:"USER_URL"}))});
+        return answer("只读来源采集：" + result.run.status, result, [evidence("RESEARCH", "RESEARCH_RUN", result.run.id)], result.run.status === "BLOCKED" ? "WAITING_USER" : result.run.status === "FAILED" ? "BLOCKED" : "COMPLETE");
+      } });
     this.add({ id: "research.start", title: "搜索行业与同类视频", description: "启动真实行业视频搜索与资料研究；遇登录或风控保留原任务。", stage: "RESEARCH", effect: "MODEL", inputSchema: z.object({
       goal: z.string().trim().min(3).max(3000), queries: z.array(z.string().trim().min(1).max(200)).max(12),
       sourceUrls: z.array(z.object({ url: z.string().url(), sourceType: source }).strict()).max(30).default([]),

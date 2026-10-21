@@ -2165,6 +2165,8 @@ async function pvsFilePayload(file){
   });
 }
 const productMaterialManager=pvsCreateMaterialManager({
+  initialItems:${jsonForScript(productInput?.assets.filter(asset=>asset.type==='image').map(asset=>({...asset,name:asset.originalFilename,previewUrl:'/api/artifacts/'+encodeURIComponent(asset.artifactId)+'/content'}))??[])},
+  initialLogo:${jsonForScript(productInput?.assets.find(asset=>asset.type==='logo')?((asset)=>({...asset,name:asset.originalFilename,previewUrl:'/api/artifacts/'+encodeURIComponent(asset.artifactId)+'/content'}))(productInput.assets.find(asset=>asset.type==='logo')!):null)},
   input:document.querySelector('#product-image-input'),
   replaceInput:document.querySelector('#product-image-replace-input'),
   list:document.querySelector('#product-image-list'),
@@ -2182,6 +2184,12 @@ const productMaterialManager=pvsCreateMaterialManager({
 document.querySelector('#product-image-pick')?.addEventListener('click',()=>productMaterialManager.pickFiles());
 document.querySelector('#product-logo-pick')?.addEventListener('click',()=>productMaterialManager.pickLogo());
 
+const savedProductInputHash=${jsonForScript(productInput?.contentHash??null)};
+const savedForbiddenChanges=${jsonForScript(productInput?.forbiddenChanges??[])};
+if(savedForbiddenChanges.length){
+  const form=document.querySelector('#product-form'),rule=savedForbiddenChanges[0];
+  form.elements.forbiddenField.value=rule.field;form.elements.forbiddenSeverity.value=rule.severity;form.elements.forbiddenDescription.value=rule.description;
+}
 
 document.querySelector('#product-form').addEventListener('submit',async(e)=>{
   e.preventDefault();
@@ -2196,10 +2204,12 @@ document.querySelector('#product-form').addEventListener('submit',async(e)=>{
     if(!productMaterialManager.getItems().length)throw new Error('请至少选择 1 张产品图片');
     const invalid=productMaterialManager.validate();
     if(invalid.length)throw new Error('请先删除或替换不可用产品图片：'+invalid.join('、'));
-    const images=[];
+    const orderedImages=[];
     const readErrors=[];
-    for(const file of productMaterialManager.getNewFiles()){
-      try{images.push(await pvsFilePayload(file));}
+    for(const item of productMaterialManager.getItems()){
+      if(item.source==='existing'){orderedImages.push({existingArtifactId:item.artifactId});continue;}
+      const file=item.file;
+      try{orderedImages.push({upload:await pvsFilePayload(file)});}
       catch(readError){readErrors.push('文件“'+file.name+'”：'+(readError.message||String(readError)));}
     }
     const logoFile=productMaterialManager.getNewLogoFile();
@@ -2210,14 +2220,16 @@ document.querySelector('#product-form').addEventListener('submit',async(e)=>{
     }
     if(readErrors.length)throw new Error(readErrors.join('；'));
     const description=String(f.get('forbiddenDescription')||'').trim();
-    const forbiddenChanges=description?[{field:f.get('forbiddenField'),severity:f.get('forbiddenSeverity'),description}]:[];
+    const forbiddenChanges=[...(description?[{field:f.get('forbiddenField'),severity:f.get('forbiddenSeverity'),description}]:[]),...savedForbiddenChanges.slice(1)];
     const payload={
       productName:f.get('productName'),
       featureDescription:f.get('featureDescription'),
       brand:f.get('brand'),
       category:f.get('category'),
-      images,
+      orderedImages,
       logo,
+      existingLogoArtifactId:productMaterialManager.getLogo()?.source==='existing'?productMaterialManager.getLogo().artifactId:undefined,
+      expectedInputHash:savedProductInputHash??undefined,
       forbiddenChanges,
       deferTruth
     };
