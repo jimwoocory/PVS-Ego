@@ -155,6 +155,10 @@ export function renderDouyinOpsGlobalPage(
   return layout("抖音运营", body);
 }
 
+export function renderDouyinOpsBlockedPage(message:string,disabled:boolean) {
+  return layout("抖音运营暂不可用",`<section class="card" role="status"><h1>${disabled?"抖音运营尚未接入":"抖音运营暂不可用"}</h1><p>${esc(message)}</p>${disabled?'<p>Ego Lite 当前只读取本机合成页面，尚未连接真实抖音账号。</p><p>账号状态：未核验。作品与运营数据：未采集，不能当作零指标。</p><p>真实账号接入和采集需要另行明确授权；本页不会启动浏览器、同步数据、发布或回复。</p>':'<p>现有项目和保存证据保留，请核对本地服务状态后再检查。</p>'}<div class="actions"><a class="button" href="/projects">返回项目工作台</a><a class="button secondary" href="/agent-cycle">打开 Agent 工作台</a></div></section>`);
+}
+
 function bindingBlock(view: DouyinOpsProjectView) {
   const binding = view.binding;
   if (binding?.status === "BOUND" && binding.awemeId) {

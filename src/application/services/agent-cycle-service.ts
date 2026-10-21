@@ -15,6 +15,8 @@ const safeText = (error: unknown) => error instanceof Error ? error.message.slic
 /** Agent chooses the work; existing services enforce execution and publication invariants. */
 export class AgentCycleService {
   private readonly activeLocal = new Map<string,{cycle:AgentCycle;action:CycleAction;controller:AbortController;checkpoint:()=>void}>();
+  private readonly advancing = new Set<Promise<AgentCycle>>();
+  private draining = false;
   constructor(readonly repository: AgentCycleRepository, readonly catalog: AgentCapabilityCatalog,
     private readonly runtime: StructuredAiRuntime, readonly skills = new PvsAgentSkills(),
     private readonly localExecutionCapabilities: ReadonlySet<string> = new Set()) {}
@@ -146,7 +148,45 @@ export class AgentCycleService {
     });
   }
 
-  async advance(projectId:string,id:string) {
+  /** Local launcher shutdown waits for durable terminal saves and lease release.
+   * This grants no new action permission and never cancels external providers. */
+  async drainLocalExecutions() {
+    this.draining=true;
+    for(const active of this.activeLocal.values())active.controller.abort();
+    await Promise.allSettled([...this.advancing]);
+  }
+  /** Bounded startup reconciliation, never planning, replay or permission reuse.
+   * A live lease cannot be claimed, including one held by another executor. */
+  async recoverInterruptedLocalExecutions() {
+    let afterId:string|undefined,recovered=0;
+    for(let pageNumber=0;pageNumber<100;pageNumber++){
+      const page=await this.listWorkerPage(afterId);
+      for(const candidate of page.cycles){
+        if(candidate.status!=="RUNNING"||!candidate.actions.some(a=>a.status==="RUNNING"&&a.localExecution)||this.activeLocal.has(candidate.id))continue;
+        await this.repository.recoverAbandoned(candidate.projectId,candidate.id);
+        const owner=randomUUID();if(!await this.repository.claim(candidate.projectId,candidate.id,owner))continue;
+        try{
+          const cycle=await this.repository.get(candidate.projectId,candidate.id),action=cycle?.actions.find(a=>a.status==="RUNNING"&&a.localExecution);
+          if(!cycle||cycle.status!=="RUNNING"||!action)continue;
+          const revision=cycle.revision;
+          action.status=action.effect==="READ"?"FAILED":"OUTCOME_UNKNOWN";
+          action.localExecution={...action.localExecution!,phase:"FAILED",workerExited:false,version:action.localExecution!.version+1};
+          action.completedAt=stamp();action.error="本机执行进程已中断，旧执行句柄和许可不能恢复；需核对原结果，不自动重提";
+          cycle.status=action.effect==="READ"?"BLOCKED":"OUTCOME_UNKNOWN";cycle.nextWakeAt=undefined;
+          this.message(cycle,action.error);cycle.revision++;cycle.updatedAt=stamp();await this.repository.save(cycle,revision,owner);recovered++;
+        }finally{await this.repository.release(candidate.id,owner);}
+      }
+      if(!page.nextAfterId)return {recovered,truncated:false};afterId=page.nextAfterId;
+    }
+    return {recovered,truncated:true};
+  }
+  advance(projectId:string,id:string):Promise<AgentCycle> {
+    if(this.draining)return Promise.reject(new DomainValidationError("工作台正在关闭，不能开始新动作"));
+    const step=this.advanceOnce(projectId,id);this.advancing.add(step);
+    void step.then(()=>this.advancing.delete(step),()=>this.advancing.delete(step));
+    return step;
+  }
+  private async advanceOnce(projectId:string,id:string) {
     return this.exclusive(projectId,id,async(cycle,save)=>{
       if(!["READY","RUNNING"].includes(cycle.status))return cycle;
       if(cycle.nextWakeAt && Date.parse(cycle.nextWakeAt)>Date.now())return cycle;
@@ -179,7 +219,7 @@ export class AgentCycleService {
           }}:undefined;
         if(local)pending.localExecution={phase:"CONNECTING",version:1,samples:0,workerExited:false};
         await save();
-        if(local)this.activeLocal.set(cycle.id,local);
+        if(local){this.activeLocal.set(cycle.id,local);if(this.draining)local.controller.abort();}
         try{
           const result=await capability.run({projectId,cycleId:cycle.id,actionId:pending.id,confirmed:Boolean(pending.confirmedAt),
             ...(local?{localExecution:{signal:local.controller.signal,report:(update:Omit<NonNullable<CycleAction["localExecution"]>,"version">)=>{
@@ -195,7 +235,7 @@ export class AgentCycleService {
             }}}:{})},pending.input);
           await progressWrites;
           if(progressError)throw progressError;
-          if(local && (!["SUCCEEDED","CANCELLED","TIMED_OUT","FAILED"].includes(pending.localExecution!.phase) || !pending.localExecution!.workerExited))throw new Error("本机执行缺少工作进程退出回执，不能确认已停止");
+          if(local && (!["SUCCEEDED","CANCELLED","TIMED_OUT","FAILED"].includes(pending.localExecution!.phase) || !pending.localExecution!.workerExited))throw new Error("本机执行缺少工作进程退出回执，不能确认已停止；"+result.summary);
           pending.result=result;pending.completedAt=stamp();pending.status=result.status==="OUTCOME_UNKNOWN"?"OUTCOME_UNKNOWN":result.status==="BLOCKED"?"FAILED":"SUCCEEDED";
           if(pending.effect==="MODEL"){
             try{pending.resultObservationHash=hashValue(await this.catalog.snapshot(projectId));}catch{/* The actual result is retained even when a secondary local observation is temporarily unavailable. */}

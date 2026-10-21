@@ -2,18 +2,24 @@
 // fixed Go receipt protocol, never executable code or an alternate URL.
 import './isolation-guard.mjs';
 import {randomUUID} from 'node:crypto';
-const pending=new Map(),finishes=new Map();let launch,server,dbClient,closing=false;
+import fs from 'node:fs';
+import path from 'node:path';
+const pending=new Map(),finishes=new Map();let launch,server,dbClient,deps,closing=false;
+let shutdownPhase='RUNNING';
+const diagnostic=extra=>{try{fs.writeFileSync(path.join(process.env.TMP,'ego-lite-child-shutdown.json'),JSON.stringify({phase:shutdownPhase,...extra}));}catch{}};
+process.on('uncaughtExceptionMonitor',error=>diagnostic({error:error.message,stack:error.stack}));
+process.once('exit',code=>diagnostic({exitCode:code}));
 process.on('message',message=>{
   if(message?.egoLiteInit&&!launch){launch=message.egoLiteInit;return;}
   if(message?.egoLiteEvent){const e=message.egoLiteEvent,p=pending.get(e.id);if(!p)return;p.events.push(e);if(e.type==='connected')p.context.localExecution?.report({phase:'CONNECTED',samples:0,workerExited:false});
     if(['succeeded','failed','timed_out','cancelled','rejected'].includes(e.type)){pending.delete(e.id);p.cleanup();p.resolve(p.events);}return;}
   if(message?.egoLiteError){const e=message.egoLiteError,p=pending.get(e.id);if(p){pending.delete(e.id);p.cleanup();p.reject(Error(e.code));}return;}
-  const completed=message?.egoLiteFinished??message?.egoLiteFinishError?.id;
-  if(completed){const p=finishes.get(completed);if(p){finishes.delete(completed);clearTimeout(p.timer);message.egoLiteFinishError?p.reject(Error(message.egoLiteFinishError.code)):p.resolve();}return;}
+  const completed=message?.egoLiteFinished?.id??message?.egoLiteFinishError?.id;
+  if(completed){const p=finishes.get(completed);if(p){finishes.delete(completed);clearTimeout(p.timer);message.egoLiteFinishError?p.reject(Error(message.egoLiteFinishError.code)):p.resolve(message.egoLiteFinished);}return;}
   if(message?.shutdown)void close();
 });
 process.once('disconnect',()=>void close());
-const send=value=>{if(!process.connected)throw Error('EGO_LITE_SUPERVISOR_DISCONNECTED');process.send(value);};
+const send=value=>{if(!process.connected)throw Error('EGO_LITE_SUPERVISOR_DISCONNECTED');process.send(value,()=>{});};
 const launchDeadline=Date.now()+10000;
 while(!launch&&!closing&&Date.now()<launchDeadline)await new Promise(r=>setTimeout(r,10));
 if(!launch||closing)throw Error('EGO_LITE_LAUNCH_DISCONNECTED');
@@ -22,10 +28,13 @@ const {prisma}=await import('../dist/src/adapters/db/prisma-client.js');
 dbClient=prisma;
 const {GoOwnedEgoResearchRuntime}=await import('../dist/src/adapters/research/go-owned-ego-research-runtime.js');
 const {EgoBrowserResearchProvider}=await import('../dist/src/adapters/research/ego-browser-research-provider.js');
+const {BrowserResearchBlockedError}=await import('../dist/src/application/ports/research-provider.js');
 const u=new URL(launch.sourceUrl);
 if(u.origin!=='http://127.0.0.1:'+process.env.PORT||!/^\/bridge-fixture\/[a-f0-9-]{36}$/.test(u.pathname)||!(/^[a-f0-9]{64}$/.test(launch.fingerprint)))throw Error('EGO_LITE_LAUNCH_DENIED');
-const finish=(scope,runId)=>new Promise((resolve,reject)=>{const id=randomUUID(),timer=setTimeout(()=>{finishes.delete(id);reject(Error('EGO_LITE_FINISH_TIMEOUT'));},30000);finishes.set(id,{resolve,reject,timer});send({egoLiteFinish:{id,scope,runId}});});
-let deps;
+const finish=(scope,runId)=>new Promise((resolve,reject)=>{
+  if(!process.connected){reject(Error('EGO_LITE_SUPERVISOR_DISCONNECTED'));return;}
+  const id=randomUUID(),timer=setTimeout(()=>{finishes.delete(id);reject(Error('EGO_LITE_FINISH_TIMEOUT'));},35000);finishes.set(id,{resolve,reject,timer});send({egoLiteFinish:{id,scope,runId}});
+});
 deps=createDefaultDependencies({egoLiteSourceUrl:launch.sourceUrl,egoLiteReadSource:async({source,projectId,runId,action})=>{
   if(source.url!==launch.sourceUrl||!action.confirmed||!action.localExecution)throw Error('EGO_LITE_CONFIRMED_LOCAL_ACTION_REQUIRED');
   const cycle=await deps.agentCycles.get(projectId,action.cycleId),a=cycle?.actions.find(a=>a.id===action.actionId);
@@ -43,15 +52,32 @@ deps=createDefaultDependencies({egoLiteSourceUrl:launch.sourceUrl,egoLiteReadSou
     const provider=new EgoBrowserResearchProvider(runtime,deps.artifacts,deps.projectsRoot,{searchUrlTemplate:launch.sourceUrl,allowPrivateNetwork:true});
     const document=await provider.fetchOwnedSource(source,{projectId,runId});captured=true;return document;
   }finally{
-    try{await finish(scope,runId);clean=true;}finally{
-      const phase=captured?'SUCCEEDED':action.localExecution.signal.aborted?'CANCELLED':ended==='timed_out'?'TIMED_OUT':'FAILED';
+    try{const receipt=await finish(scope,runId);clean=receipt.workerExited===true;if(receipt.failureCode)throw Error(receipt.failureCode);}catch(error){
+      const code=/^EGO_LITE_[A-Z_]{1,70}$/.test(error.message)?error.message:'EGO_LITE_CLEANUP_FAILED';
+      throw new BrowserResearchBlockedError({status:'BLOCKED',blockerCode:'BROWSER_SESSION_EXPIRED',message:'本机Ego执行已阻断：'+code,requiredUserAction:'核对原动作和退出回执；不自动重启宿主、恢复旧许可或重新采集。'});
+    }finally{
+      const phase=!clean?'FAILED':captured?'SUCCEEDED':ended==='timed_out'?'TIMED_OUT':action.localExecution.signal.aborted?'CANCELLED':'FAILED';
       action.localExecution.report({phase,samples:0,workerExited:clean});
     }
   }
 }});
+await deps.agentCycles.recoverInterruptedLocalExecutions();
 server=createAppServer(deps);
 await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(Number(process.env.PORT),'127.0.0.1',resolve);});
 send({ready:true});console.log('PVS_EGO_LITE_LOCAL_READY '+process.env.PORT);
-async function close(){if(closing)return;closing=true;for(const [id,p] of pending){try{send({egoLiteCancel:{id}});}catch{}p.cleanup();p.reject(Error('EGO_LITE_APPLICATION_CLOSING'));}pending.clear();
-  if(server)await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});await dbClient?.$disconnect();if(process.connected)process.disconnect();
+async function close(){if(closing)return;closing=true;
+  // An unresolved native Prisma promise does not itself keep Node alive once
+  // IPC/listening sockets close. Hold a local handle through the durable drain.
+  const keepAlive=setInterval(()=>{},100);shutdownPhase='DRAINING';
+  try{
+  const closed=server?new Promise(resolve=>server.close(resolve)):Promise.resolve();
+  if(!process.connected){
+    for(const p of pending.values()){p.cleanup();p.reject(Error('EGO_LITE_SUPERVISOR_DISCONNECTED'));}pending.clear();
+    for(const p of finishes.values()){clearTimeout(p.timer);p.reject(Error('EGO_LITE_SUPERVISOR_DISCONNECTED'));}finishes.clear();
+  }
+  // Keep Prisma and the transport alive until Agent.advance has saved its
+  // terminal result AND released its lease, including a late-cancel race.
+  await deps?.agentCycles?.drainLocalExecutions();shutdownPhase='LEASES_RELEASED';await closed;
+  await dbClient?.$disconnect();shutdownPhase='CLOSED';if(process.connected)process.disconnect();
+  }finally{clearInterval(keepAlive);}
 }

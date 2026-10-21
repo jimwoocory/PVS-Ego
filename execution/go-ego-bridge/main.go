@@ -530,6 +530,9 @@ func main() {
 	if e == nil {
 		e = c.validate(*file)
 	}
+	if e == nil {
+		e = installWorkerLifetimeGuard()
+	}
 	if e != nil {
 		fmt.Fprintln(os.Stderr, e.Error())
 		os.Exit(2)

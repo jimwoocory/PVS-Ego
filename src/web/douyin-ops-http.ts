@@ -13,7 +13,8 @@ import { DouyinOpsRuntimeError } from "../application/ports/douyin-ops-runtime.j
 import { DomainValidationError } from "../domain/validation.js";
 import {
   renderDouyinOpsGlobalPage,
-  renderDouyinOpsProjectPage
+  renderDouyinOpsProjectPage,
+  renderDouyinOpsBlockedPage
 } from "./douyin-ops-ui.js";
 
 function json(
@@ -71,6 +72,9 @@ function publicError(error: unknown): {
   code: string;
   message: string;
 } {
+  if(error&&typeof error==="object"&&"code" in error&&error.code==="ISOLATION_REAL_PORT_DISABLED")return {
+    status:503,code:"DOUYIN_OPS_EXECUTION_DISABLED",message:"当前隔离版本尚未启用抖音运营执行器。"
+  };
   if (error instanceof z.ZodError) {
     return {
       status: 400,
@@ -211,6 +215,7 @@ export async function handleDouyinOpsHttp(
 
   const service = deps.douyinOpsDashboard;
   if (!service) {
+    if((globalPage||projectPage)&&req.method==="GET"){html(res,503,renderDouyinOpsBlockedPage("抖音运营服务尚未配置。",true));return true;}
     json(res, 503, {
       code: "DOUYIN_OPS_UNAVAILABLE",
       message: "抖音运营服务尚未配置"
@@ -594,6 +599,9 @@ export async function handleDouyinOpsHttp(
     return true;
   } catch (error) {
     const mapped = publicError(error);
+    if((globalPage||projectPage)&&req.method==="GET"){
+      html(res,mapped.status,renderDouyinOpsBlockedPage(mapped.message,mapped.code==="DOUYIN_OPS_EXECUTION_DISABLED"));return true;
+    }
     json(res, mapped.status, {
       code: mapped.code,
       message: mapped.message

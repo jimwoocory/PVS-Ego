@@ -14,9 +14,10 @@ const id=v=>typeof v==='string'&&/^[A-Za-z0-9-]{1,80}$/.test(v);
 const actionKey=s=>JSON.stringify([s?.projectId,s?.cycleId,s?.actionId,s?.contextHash]);
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function until(test,label,ms=15000){const end=Date.now()+ms;while(Date.now()<end){if(test())return;await delay(20);}throw Error(label);}
-function child(exe,args,env,ipc=false){
+function child(exe,args,env,ipc=false,role='application'){
   const p=spawn(exe,args,{cwd:root,env,windowsHide:true,stdio:['pipe','pipe','pipe',...(ipc?['ipc']:[])]});
-  const c={p,closed:false,code:null,signal:null,stdout:'',stderr:''};
+  const c={p,role,closed:false,code:null,signal:null,stdout:'',stderr:''};
+  p.stdin.on('error',e=>{c.stdinError=e.code??'STDIN_CLOSED';});
   p.stdout.on('data',b=>{c.stdout=(c.stdout+b).slice(-8000000);});p.stderr.on('data',b=>{c.stderr=(c.stderr+b).slice(-100000);});
   p.on('error',e=>{c.error=e.code??'SPAWN_FAILED';});
   c.exit=new Promise(resolve=>p.once('close',(code,signal)=>{Object.assign(c,{closed:true,code,signal});resolve(c);}));
@@ -33,7 +34,7 @@ export async function startWorkbench({env,installation=loadInstallation()}){
   const db=new DatabaseSync(scope.database,{readOnly:true});
   const children=[],events=[],completedScopes=new Set();let active,stopping=false,stopPromise;
   const app=child(process.execPath,[path.join(root,'scripts/serve-ego-lite-child.mjs')],env,true);children.push(app);
-  const send=value=>{if(app.p.connected)app.p.send(value);};
+  const send=value=>{if(app.p.connected)app.p.send(value,()=>{});};
   function permit(request){
     if(!request||request.op!=='start'||!id(request.id)||!['session-open','session-read'].includes(request.mode)||request.timeoutMs!==10000||!id(request.researchRunId)||!request.scope||!id(request.scope.projectId)||!id(request.scope.cycleId)||!id(request.scope.actionId)||!(/^[a-f0-9]{64}$/.test(request.scope.contextHash)))throw Error('EGO_LITE_REQUEST_DENIED');
     const r=db.prepare('SELECT projectId,status,dataJson,leasePid,leaseOwner FROM AgentCycleRecord WHERE id=?').get(request.scope.cycleId);
@@ -51,40 +52,46 @@ export async function startWorkbench({env,installation=loadInstallation()}){
     fs.mkdirSync(local.dir,{recursive:true});fs.mkdirSync(path.join(local.dir,'evidence'));
     local.ready=(async()=>{
       if(JSON.stringify(loadInstallation())!==JSON.stringify(installation)||digest(path.join(root,'.runtime/ego-lite-installation.json'))!==fingerprint)throw Error('EGO_LITE_INSTALLATION_CHANGED');
-      const stop=path.join(local.dir,'stop'),entry=path.join(local.dir,'host.mjs');local.stopFile=stop;
-      fs.writeFileSync(entry,`import {app} from 'electron';import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';app.on('session-created',s=>{s.webRequest.onBeforeRequest((d,cb)=>{let allow=false;try{const u=new URL(d.url);if(u.protocol==='file:'){const rel=path.relative(${JSON.stringify(path.dirname(installation.hostMain))},fileURLToPath(u));allow=rel!==''&&!rel.startsWith('..')&&!path.isAbsolute(rel);}else allow=u.href==='about:blank'||(d.method==='GET'&&u.href===${JSON.stringify(sourceUrl)});}catch{}cb({cancel:!allow});});s.on('will-download',(event,item)=>{event.preventDefault();item.cancel();});});const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(stop)})){clearInterval(timer);app.quit();}},50);await import(${JSON.stringify(pathToFileURL(installation.hostMain).href)});`);
+      const stop=path.join(local.dir,'stop'),entry=path.join(local.dir,'host.mjs'),heartbeat=path.join(local.dir,'supervisor-heartbeat');local.stopFile=stop;
+      fs.writeFileSync(heartbeat,String(process.pid));local.heartbeat=setInterval(()=>{try{fs.writeFileSync(heartbeat,String(process.pid));}catch{clearInterval(local.heartbeat);}},500);
+      fs.writeFileSync(entry,`import {app} from 'electron';import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';app.on('session-created',s=>{s.webRequest.onBeforeRequest((d,cb)=>{let allow=false;try{const u=new URL(d.url);if(u.protocol==='file:'){const rel=path.relative(${JSON.stringify(path.dirname(installation.hostMain))},fileURLToPath(u));allow=rel!==''&&!rel.startsWith('..')&&!path.isAbsolute(rel);}else allow=u.href==='about:blank'||(d.method==='GET'&&u.href===${JSON.stringify(sourceUrl)});}catch{}cb({cancel:!allow});});s.on('will-download',(event,item)=>{event.preventDefault();item.cancel();});});const parentAlive=()=>{try{process.kill(${process.pid},0);return Date.now()-fs.statSync(${JSON.stringify(heartbeat)}).mtimeMs<5000;}catch{return false;}};const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(stop)})||!parentAlive()){clearInterval(timer);app.quit();}},100);await import(${JSON.stringify(pathToFileURL(installation.hostMain).href)});`);
       const hostEnv={};for(const k of ['SystemRoot','WINDIR','COMSPEC','PATHEXT'])if(env[k])hostEnv[k]=env[k];
       Object.assign(hostEnv,{EGO_WINDOWS_DATA_DIR:path.join(local.dir,'host'),PATH:path.dirname(process.execPath),HOME:local.dir,USERPROFILE:local.dir,LOCALAPPDATA:path.join(local.dir,'home/local'),APPDATA:path.join(local.dir,'home/roaming'),TEMP:local.dir,TMP:local.dir});
-      local.host=child(installation.electron,[entry,'--disable-background-networking','--disable-component-update','--disable-sync','--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'],hostEnv);children.push(local.host);
+      local.host=child(installation.electron,[entry,'--disable-background-networking','--disable-component-update','--disable-sync','--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'],hostEnv,false,'host');children.push(local.host);
+      local.host.p.once('close',()=>{
+        if(!local.finishing){local.failureCode='EGO_LITE_HOST_DISCONNECTED';for(const requestId of local.pending.keys())local.bridge?.p.stdin.write(JSON.stringify({op:'cancel',id:requestId})+'\n');}
+      });
       await until(()=>local.host.stdout.includes('EGO_WINDOWS_HOST_READY')||local.host.closed,'EGO_LITE_HOST_START_TIMEOUT',30000);
       if(local.host.closed)throw Error('EGO_LITE_HOST_START_FAILED');
       const host=JSON.parse(fs.readFileSync(path.join(local.dir,'host/host-instance.json'),'utf8'));
       const pin=file=>installation.pins.find(p=>p.file===file).sha256;
       const cfg={contract:'pvs-go-ego-local-v1',session:local.dir,node:installation.node,nodeSha256:pin(installation.node),cli:installation.cli,cliSha256:pin(installation.cli),sdk:installation.sdk,sdkSha256:pin(installation.sdk),dataDir:path.join(local.dir,'host'),instanceId:'windows-host:'+host.instanceId,origin,nonce};
       const config=path.join(local.dir,'config.json');fs.writeFileSync(config,JSON.stringify(cfg));
-      local.bridge=child(installation.bridge,['--config',config],hostEnv);children.push(local.bridge);
+      local.bridge=child(installation.bridge,['--config',config],hostEnv,false,'bridge');children.push(local.bridge);
       createInterface({input:local.bridge.p.stdout}).on('line',line=>{
         if(line.length>2000000){local.bridge.p.kill();return;}
         let event;try{event=JSON.parse(line);}catch{local.bridge.p.kill();return;}
         if(event.type==='ready'){local.bridgeReady=true;return;}
         const pending=local.pending.get(event.id);if(!pending)return;
         if(++pending.count>66){local.bridge.p.kill();return;}
-        events.push({id:event.id,type:event.type,code:event.code,workerExited:event.data?.workerExited});send({egoLiteEvent:event});
+        events.push({id:event.id,type:event.type,at:event.at,code:event.code,workerPid:event.data?.workerPid,workerExited:event.data?.workerExited});send({egoLiteEvent:event});
         if(terminal.has(event.type))local.pending.delete(event.id);
       });
-      local.bridge.p.once('close',()=>{for(const requestId of local.pending.keys())send({egoLiteError:{id:requestId,code:'EGO_LITE_BRIDGE_CLOSED'}});local.pending.clear();});
+      local.bridge.p.once('close',()=>{if(!local.finishing)local.failureCode??='EGO_LITE_BRIDGE_DISCONNECTED';for(const requestId of local.pending.keys())send({egoLiteError:{id:requestId,code:'EGO_LITE_BRIDGE_CLOSED'}});local.pending.clear();});
       await until(()=>local.bridgeReady||local.bridge.closed,'EGO_LITE_BRIDGE_START_TIMEOUT');if(local.bridge.closed)throw Error('EGO_LITE_BRIDGE_START_FAILED');
     })();return local.ready;
   }
   function finish(){
-    const local=active;if(!local)return Promise.resolve();
+    const local=active;if(!local)return Promise.resolve({workerExited:true,clean:true});
     if(local.finishing)return local.finishing;
     local.finishing=(async()=>{
     await local.ready.catch(()=>{});
-    if(local.bridge&&!local.bridge.closed){local.bridge.p.stdin.end();await until(()=>local.bridge.closed,'EGO_LITE_BRIDGE_STOP_TIMEOUT',12000).catch(()=>local.bridge.p.kill());await local.bridge.exit;}
-    if(local.host&&!local.host.closed){fs.writeFileSync(local.stopFile,'owned host only');await until(()=>local.host.closed,'EGO_LITE_HOST_STOP_TIMEOUT',10000).catch(()=>local.host.p.kill());await local.host.exit;}
-    const clean=[local.bridge,local.host].filter(Boolean).every(c=>c.closed&&c.code===0);completedScopes.add(local.key);active=undefined;
-    if(!clean)throw Error('EGO_LITE_CHILD_EXIT_UNCONFIRMED');
+    if(local.heartbeat)clearInterval(local.heartbeat);
+    if(local.bridge&&!local.bridge.closed){local.bridge.p.stdin.end();await until(()=>local.bridge.closed,'EGO_LITE_BRIDGE_STOP_TIMEOUT',12000).catch(()=>{local.bridge.forced=true;local.bridge.p.kill();});await until(()=>local.bridge.closed,'EGO_LITE_BRIDGE_KILL_UNCONFIRMED',3000).catch(()=>{});}
+    if(local.host&&!local.host.closed){fs.writeFileSync(local.stopFile,'owned host only');await until(()=>local.host.closed,'EGO_LITE_HOST_STOP_TIMEOUT',10000).catch(()=>{local.host.forced=true;local.host.p.kill();});await until(()=>local.host.closed,'EGO_LITE_HOST_KILL_UNCONFIRMED',3000).catch(()=>{});}
+    const owned=[local.bridge,local.host].filter(Boolean),workerExited=owned.every(c=>c.closed&&!c.forced),clean=owned.every(c=>c.closed&&c.code===0&&!c.forced);
+    const receipt={workerExited,clean,...(local.failureCode?{failureCode:local.failureCode}:!clean?{failureCode:'EGO_LITE_CHILD_EXIT_UNCONFIRMED'}:{})};
+    fs.writeFileSync(path.join(local.dir,'exit-receipt.json'),JSON.stringify({...receipt,diagnostics:owned.map(c=>({role:c.role,code:c.code,signal:c.signal,stdout:c.stdout,stderr:c.stderr}))}));completedScopes.add(local.key);active=undefined;return receipt;
     })();return local.finishing;
   }
   app.p.on('message',message=>{
@@ -96,6 +103,7 @@ export async function startWorkbench({env,installation=loadInstallation()}){
         if(active?.key===key&&active.runId===r.researchRunId)active.waitingIds.add(r.id);
         await ready;if(!active||active.key!==key||active.runId!==r.researchRunId||active.cancelled||active.finishing){send({egoLiteError:{id:r.id,code:'EGO_LITE_CANCELLED_BEFORE_WORKER',workerExited:true}});return;}
         active.waitingIds.delete(r.id);
+        if(active.failureCode)throw Error(active.failureCode);
         permit(r);if(active.requests>=8||active.ids.has(r.id)||active.pending.size)throw Error('EGO_LITE_REQUEST_LIMIT');
         active.requests++;active.ids.add(r.id);active.pending.set(r.id,{count:0});active.bridge.p.stdin.write(JSON.stringify(r)+'\n');
       }catch(error){send({egoLiteError:{id:r?.id,code:error.message}});}
@@ -103,7 +111,7 @@ export async function startWorkbench({env,installation=loadInstallation()}){
     if(message?.egoLiteCancel){const r=message.egoLiteCancel;if(active&&id(r.id)&&(active.pending.has(r.id)||active.waitingIds.has(r.id))){active.cancelled=true;if(active.pending.has(r.id))active.bridge.p.stdin.write(JSON.stringify({op:'cancel',id:r.id})+'\n');}return;}
     if(message?.egoLiteFinish){const r=message.egoLiteFinish;if(!id(r.id))return;
       const own=active&&active.key===actionKey(r.scope)&&active.runId===r.runId;
-      void(own?finish():Promise.resolve()).then(()=>send({egoLiteFinished:r.id})).catch(error=>send({egoLiteFinishError:{id:r.id,code:error.message}}));}
+      void(own?finish():Promise.resolve({workerExited:true,clean:true})).then(receipt=>send({egoLiteFinished:{id:r.id,...receipt}})).catch(error=>send({egoLiteFinishError:{id:r.id,code:error.message}}));}
   });
   send({egoLiteInit:{sourceUrl,fingerprint}});
   try{
@@ -113,11 +121,13 @@ export async function startWorkbench({env,installation=loadInstallation()}){
     send({shutdown:true});await until(()=>app.closed,'EGO_LITE_STARTUP_CLEANUP_TIMEOUT',3000).catch(()=>app.p.kill());await app.exit;db.close();throw error;
   }
   const stop=()=>stopPromise??=(async()=>{
-    stopping=true;if(active){active.cancelled=true;for(const requestId of active.pending.keys())active.bridge?.p.stdin.write(JSON.stringify({op:'cancel',id:requestId})+'\n');}
-    await finish();send({shutdown:true});await until(()=>app.closed,'EGO_LITE_APPLICATION_STOP_TIMEOUT',12000).catch(()=>app.p.kill());await app.exit;db.close();
-    const record={sourceUrl,events,children:children.map(c=>({pid:c.p.pid,closed:c.closed,code:c.code,signal:c.signal,error:c.error})),status:children.every(c=>c.closed&&c.code===0)?'CLEAN_OWNED_EXITS':'EXIT_NOT_CLEAN'};
+    stopping=true;send({shutdown:true});if(active){active.cancelled=true;for(const requestId of active.pending.keys())active.bridge?.p.stdin.write(JSON.stringify({op:'cancel',id:requestId})+'\n');}
+    const cleanup=await finish().catch(error=>({workerExited:false,clean:false,failureCode:error.message}));
+    await until(()=>app.closed,'EGO_LITE_APPLICATION_STOP_TIMEOUT',45000).catch(()=>{app.forced=true;app.p.kill();});await until(()=>app.closed,'EGO_LITE_APPLICATION_KILL_UNCONFIRMED',3000).catch(()=>{});db.close();
+    const record={sourceUrl,events,cleanup,children:children.map(c=>({pid:c.p.pid,role:c.role,closed:c.closed,code:c.code,signal:c.signal,error:c.error,forced:c.forced??false})),status:children.every(c=>c.closed&&c.code===0&&!c.forced)?'CLEAN_OWNED_EXITS':'EXIT_NOT_CLEAN'};
     fs.writeFileSync(path.join(session,'receipt.json'),JSON.stringify(record,null,2));return record;
   })();
   app.p.once('close',()=>{if(!stopping)void stop().catch(()=>{});});
-  return {origin,sourceUrl,session,stop,application:app,events};
+  const snapshot=()=>({events:[...events],children:children.map(c=>({pid:c.p.pid,role:c.role,closed:c.closed,code:c.code})),active:active?{dir:active.dir}:null});
+  return {origin,sourceUrl,session,stop,application:app,events,snapshot};
 }

@@ -241,7 +241,7 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
         assertOwnedEgoLiteSources(this.d.publicBaseUrl, input.sourceUrls,this.d.ownedEgoLiteSourceUrl);
         if(!this.d.collectEgoLiteEvidence)throw new DomainValidationError("Ego Lite 本机执行器尚未接入，未开始采集");
         const result = await this.d.collectEgoLiteEvidence(context,{goal:input.goal,sourceUrls:input.sourceUrls.map(item=>({url:item.url,sourceType:"USER_URL"}))});
-        return answer("只读来源采集：" + result.run.status, result, [evidence("RESEARCH", "RESEARCH_RUN", result.run.id)], result.run.status === "BLOCKED" ? "WAITING_USER" : result.run.status === "FAILED" ? "BLOCKED" : "COMPLETE");
+        return answer("只读来源采集：" + result.run.status+(result.run.blockerMessage?"；"+result.run.blockerMessage:""), result, [evidence("RESEARCH", "RESEARCH_RUN", result.run.id)], result.run.status === "BLOCKED" ? "WAITING_USER" : result.run.status === "FAILED" ? "BLOCKED" : "COMPLETE");
       } });
     this.add({ id: "research.start", title: "搜索行业与同类视频", description: "启动真实行业视频搜索与资料研究；遇登录或风控保留原任务。", stage: "RESEARCH", effect: "MODEL", inputSchema: z.object({
       goal: z.string().trim().min(3).max(3000), queries: z.array(z.string().trim().min(1).max(200)).max(12),
