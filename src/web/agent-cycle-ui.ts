@@ -19,6 +19,7 @@ export function renderAgentCyclePage(input:{project?:{id:string;name:string};pro
   ${!projectId?`<section><h2>选择已有项目</h2>${input.projects.map(project=>`<p><a href="/projects/${encodeURIComponent(project.id)}/agent-cycle">${escape(project.name)} · 打开 Agent 工作台</a></p>`).join("")}<a href="/projects">新建或管理项目</a></section>`:`
   ${renderCheckpoint(input.snapshot)}
   ${input.snapshot?.feedbackReadError||(input.snapshot?.operations as {insightReadError?:boolean}|undefined)?.insightReadError?'<p role="alert">部分保存反馈或复盘暂不可核验；已保留原记录，没有作为新输入使用。</p>':""}
+  ${(input.snapshot?.operations as {metricReadError?:boolean}|undefined)?.metricReadError?'<p role="alert">保存指标暂不可核验；原记录已保留，没有作为新输入使用，也不把读取失败解释为零或没有观察。</p>':""}
   ${renderOperationsOverview(projectId,input.operationsReview)}
   <section><h2>${input.cycles.some(c=>!["COMPLETED","CANCELLED"].includes(c.status))?"已有任务可在下方继续；新目标另开一轮":"这次想完成什么？"}</h2><form id="goal-form"><textarea id="goal" required minlength="3" maxlength="6000" placeholder="例如：研究这个行业的同类视频，结合产品资料制作一条广告；发布后收集指标和评论，复盘并形成下一轮创意。"></textarea><p class="muted">Agent在后台调用自有技能和业务工具，沿用当前已确认资料。付费生成、发布和回复前展示具体内容请你确认；价格未核实不会请求扣费。</p><button type="submit">开始新一轮 Agent 任务</button></form><p id="error" role="alert" class="error"></p></section>
   <section><h2>我们的业务技能</h2>${input.skills.map(skill=>`<span class="stage">${escape(skill.title)}</span>`).join("")}</section><div id="cycles">${input.cycles.map(renderCycle).join("")||"<p>暂无 Agent 任务。现有项目资料不会因打开本页而改变。</p>"}</div>

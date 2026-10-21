@@ -1,14 +1,28 @@
 # PR #1 逐文件审查覆盖清单
 
-审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录替代文件**。本轮新增 3 项后最终范围为 **116 项**，新增项在末表单独列出。已修改的原文件仍计入原 113 项。
+审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录替代文件**。C1 新增 3 项后为116项；C2 再增3项，当前范围为 **119 项**。新增项在末表单独列出，已修改的原文件仍计入原113项。
 
-这是指定深度的静态审查与证据索引，**不是 116 个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。原生 Go/worker 前轮修复结合未变源码与其当时证据复核。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
+这是指定深度的静态审查与证据索引，**不是119个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。原生 Go/worker 前轮修复结合未变源码与其当时证据复核。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
 
-## 本轮补漏与当前运行证据
+## C1 前轮补漏与限定运行证据
 
 - **F1 / P1 已修复**：保存指标在只读展示、原计划异常续接/观察和复盘之间没有统一核对原文与投影。现在核对项目、绑定、作品、原文 SHA、数值、可见性、时长及原账号/作者，计划再核对精确 captureKey。不一致保留不可核验或未知读取意图，不推进、重读或调用模型。历史来源字段不充分时保持不可核验，不自动补签。
 - **F2 / P2 已修复**：Go 本地正文缓存/显式恢复允许内部目录联接。现在要求原目录实际路径一致、逐层无联接，读取前后核对文件身份与状态；拒绝时不将 PENDING 提升 READY。
 - **C1**：`npm run build` 退出 0；本轮唯一 `npm run test:pr1-final-review` **27/27、退出 0**。12 个保存指标审阅、2 个原计划负例、3 个模型前拒绝、10 个本地缓存/恢复文件案例。受原守卫约束，固定内存服务、新建本地合成文件；无业务 DB 查询、Go/SDK/宿主、HTTP/浏览器、平台或模型调用。链接拒绝可能由守卫和提供者共同完成，不据此宣称 OS 级防护。原始日志、SHA 清单、退出记录和 checkpoint 只在本地忽略目录保存。
+
+## C2 当前共享指标 Prisma/HTTP/原生浏览器专项
+
+以 `6174ca5` 为起点，只运行 `npm run test:pr1-metrics-integration` 一个定向套件，构建退出0。最终 **23/23（22子项加父项）、退出0**，两个实际应用进程正常退出0。使用仓库迁移新空库、实际 Prisma 仓库和原服务/HTTP/工作台；指标及空评论页由固定本地函数返回，未查询真实平台。
+
+- **F3 / P1 已修复**：部分指标按键查询核验原版本摘要，但列表读取只解析 JSON；JSON 和内部摘要一同改变、原版本行摘要未变时，列表可能被复盘使用。现在写入返回、按键查询与列表共用版本行核验（ID/项目/类型/key/版本/状态/原摘要），普通数值行也统一核验原文与投影。失败不修复旧记录、不触发新采集。
+- **F4 / P2 已修复**：原工作台概览未单独处理指标读取失败，也未按当前原账号核验列表。严格读取失败可能使工作台报错；账号不一致的记录可能进入能力上下文。现在概览核验原绑定及账号，失败返回明确 `metricReadError` 和空指标列表；工作台保持200并明确显示“不可核验”，不把错误解释为零或没有观察。
+- 实际覆盖完整零值与不可见指标的两种存储、保存证据 HTTP/HTML、只读数据库不变、11类损坏记录、模型前拒绝、规则整理保存原始观察、实际应用重启、原指标意图已落库后的不重读续接，以及损坏意图不读取后续评论。原意图由夹具显式构造，不是本轮真实进程崩溃注入。
+- Tabbit 原生导航、工作台证据链接、零值/不可见显示、取消保持暂停、未勾选拒绝、明确确认仅保存一次原范围续接、损坏页不可核验及损坏项目工作台警示均完成。11类负例同时检查工作台200、错误标记和空指标上下文。后端核对仅一次成功续接 POST，原预算/次数/工作区未改，浏览器期间无新增数据读取；模型配置、执行和生成尝试均为0。离线规则整理不等于真实建议被采用。
+- **截图视觉仍 BLOCKED**：截图请求在60000ms执行截止后中断，未取得合格图片。原任务被终止，旧回执随后不可读取；已按恢复流程用新只读任务核对实际保存状态，未重放提交，关闭自建标签并正常 finish。初次隐式页面变为空白的控件查找失败也保留，改为已观察的自有 tab ID 后继续。原生交互成功记录与后端状态不能替代截图视觉验收。
+
+初轮23/23后发现F4，构建成功后只复跑同一专项；最终新空库23/23包含上述工作台检查，两个应用进程及原生浏览器任务正常收尾。截图失败保留在初轮证据中，最终轮没有重复尝试截图；两轮不累计通过数。
+
+本轮无真实 Go/SDK/宿主或平台调用、模型推理、素材外发、付费生成、上传/发布/回复。C1及H历史专项均未重跑；C2只证明上述共享指标切片，其他业务路径、长期worker和真实平台缺口保持。模型 aihubmix/deepseek-v4.1-flash，音频 NOT_OBSERVED、费用 UNKNOWN。
 
 ## 历史证据索引
 
@@ -70,7 +84,7 @@
 | 035 | [src/adapters/db/prisma-browser-publish-checkpoints.ts](../src/adapters/db/prisma-browser-publish-checkpoints.ts) | 差异/关键调用链 | 版本 CAS、原成片双占位、事务与历史检查点完整性 | H6 |
 | 036 | [src/adapters/db/prisma-douyin-collection-repository.ts](../src/adapters/db/prisma-douyin-collection-repository.ts) | 差异/关键调用链 | 按原请求查询；人工续接版本/租约约束 | H8,H10 |
 | 037 | [src/adapters/db/prisma-douyin-operations-schedule-repository.ts](../src/adapters/db/prisma-douyin-operations-schedule-repository.ts) | 差异/关键调用链 | 数据库行与 JSON 范围一致；父子单事务续接及租约 | H8,H9,H10 |
-| 038 | [src/adapters/db/prisma-douyin-ops-repository.ts](../src/adapters/db/prisma-douyin-ops-repository.ts) | 差异/关键调用链 | 指标/评论保存事务内核验写入护栏；现有投影读取语义 | H8 |
+| 038 | [src/adapters/db/prisma-douyin-ops-repository.ts](../src/adapters/db/prisma-douyin-ops-repository.ts) | 差异/关键调用链及实际DB | 保存事务写护栏；F3普通/部分指标统一读取核验 | H8；C2指标读取/列表/写入返回 |
 | 039 | [src/adapters/db/prisma-product-flow-repository.ts](../src/adapters/db/prisma-product-flow-repository.ts) | 差异/关键调用链 | 保存版本 ID/项目/版本/内容哈希核验 | H9 |
 | 040 | [src/adapters/db/prisma-reference-video-repository.ts](../src/adapters/db/prisma-reference-video-repository.ts) | 差异/关键调用链 | 活动/过期分析记录与内容绑定；v3 摘要 | H7 |
 | 041 | [src/adapters/publish/ego-staged-publisher-runtime.ts](../src/adapters/publish/ego-staged-publisher-runtime.ts) | 差异/关键调用链 | 候选本机网址、显式端口和原服务保护端口限制 | H6 |
@@ -93,13 +107,13 @@
 | 058 | [src/application/services/douyin-collection-service.ts](../src/application/services/douyin-collection-service.ts) | 差异/关键调用链 | 原账号/游标续接；读取与保存前护栏传递 | H8,H10 |
 | 059 | [src/application/services/douyin-comment-service.ts](../src/application/services/douyin-comment-service.ts) | 差异/关键调用链 | 异步账号校验后再检查读护栏，事务保存传递 | H8 |
 | 060 | [src/application/services/douyin-metric-service.ts](../src/application/services/douyin-metric-service.ts) | 差异/关键调用链 | 指标缺项不补零；读取/保存护栏与原 captureKey | H8 |
-| 061 | [src/application/services/douyin-operations-schedule-service.ts](../src/application/services/douyin-operations-schedule-service.ts) | 差异/关键调用链 | 未知读取意图、预算/期限、原父子续接；F1 已修复 | H8,H10；C1 两个原计划负例 |
-| 062 | [src/application/services/douyin-read-evidence-audit.ts](../src/application/services/douyin-read-evidence-audit.ts) | 差异/关键调用链 | 评论原文对照；新增保存指标原文/数值/可见性/账号核验 | H7；C1 指标相关路径 |
-| 063 | [src/application/services/douyin-retrospective-service.ts](../src/application/services/douyin-retrospective-service.ts) | 差异/关键调用链 | 冻结原始指标/评论真实性和原账号；F1 已修复 | H8；C1 三个模型前置拒绝 |
-| 064 | [src/application/services/operations-evidence-reader.ts](../src/application/services/operations-evidence-reader.ts) | 差异/关键调用链 | 只读计划、指标、原候选输入和历史反馈；F1 已修复 | H9,H10；C1 指标审阅 |
+| 061 | [src/application/services/douyin-operations-schedule-service.ts](../src/application/services/douyin-operations-schedule-service.ts) | 差异/关键调用链 | 未知读取意图、预算/期限、原父子续接；F1 已修复 | H8,H10；C1负例；C2实际步骤/重启/保存意图 |
+| 062 | [src/application/services/douyin-read-evidence-audit.ts](../src/application/services/douyin-read-evidence-audit.ts) | 差异/关键调用链 | 评论原文对照；保存指标原文/数值/可见性/账号核验 | H7；C1、C2仅保存指标相关路径 |
+| 063 | [src/application/services/douyin-retrospective-service.ts](../src/application/services/douyin-retrospective-service.ts) | 差异/关键调用链 | 冻结原始指标/评论真实性和原账号；F1 已修复 | H8；C1拒绝；C2实际规则整理与负例，非模型 |
+| 064 | [src/application/services/operations-evidence-reader.ts](../src/application/services/operations-evidence-reader.ts) | 差异/关键调用链 | 只读计划、指标、原候选输入和历史反馈；F1 已修复 | H9,H10；C1；C2指标HTTP/HTML，非候选全链 |
 | 065 | [src/application/services/product-director.ts](../src/application/services/product-director.ts) | 差异/关键调用链 | 当前参考与输入/输出引用一致；使用规则核验前后检查 | H7 |
 | 066 | [src/application/services/publish-bridge-service.ts](../src/application/services/publish-bridge-service.ts) | 差异/关键调用链 | 任何同成片准备检查点都阻止换包绕过占位 | H6 |
-| 067 | [src/application/services/pvs-agent-capabilities.ts](../src/application/services/pvs-agent-capabilities.ts) | 差异/关键调用链 | 原范围 HUMAN_DECISION 续接；坏数据不作为空反馈 | H8,H9 |
+| 067 | [src/application/services/pvs-agent-capabilities.ts](../src/application/services/pvs-agent-capabilities.ts) | 差异/关键调用链及实际上下文 | 原范围 HUMAN_DECISION 续接；F4指标原账号核验及显式错误状态 | H8,H9；C2损坏指标上下文 |
 | 068 | [src/application/services/reference-video-analysis.ts](../src/application/services/reference-video-analysis.ts) | 差异/关键调用链 | 源视频、帧、采样清单及活动版本；禁止历史证据自动补签 | H7 |
 | 069 | [src/application/services/reference-video-evidence.ts](../src/application/services/reference-video-evidence.ts) | 差异/关键调用链 | 文件/链接/字节摘要；下游初次及纠错请求前后核验 | H7 |
 | 070 | [src/application/services/research-evidence-reader.ts](../src/application/services/research-evidence-reader.ts) | 差异/关键调用链 | 原研究归属、正文回执和保存文件；截图不宣称已验证 | H2,H3,H11 |
@@ -111,10 +125,10 @@
 | 076 | [src/domain/douyin-operations-schedule.ts](../src/domain/douyin-operations-schedule.ts) | 差异/关键调用链 | 读取意图协议、历史次数/检查点/父评论上限 | H8,H10 |
 | 077 | [src/domain/schemas.ts](../src/domain/schemas.ts) | 差异/关键调用链 | 采样清单引用仅为可选历史兼容；执行端仍要求充分证据 | H7 |
 | 078 | [src/web/agent-cycle-http.ts](../src/web/agent-cycle-http.ts) | 差异/关键调用链 | 本机/令牌门禁沿用；页面仅注入只读运营概览 | H1,H9 |
-| 079 | [src/web/agent-cycle-ui.ts](../src/web/agent-cycle-ui.ts) | 差异/关键调用链 | 转义输出、仅具体动作确认、本机取消状态、只读证据入口 | H1,H9 |
+| 079 | [src/web/agent-cycle-ui.ts](../src/web/agent-cycle-ui.ts) | 差异/关键调用链及原生交互 | 转义输出、仅具体动作确认、本机取消状态、只读证据入口；F4指标错误警示 | H1,H9；C2工作台200及不可核验提示 |
 | 080 | [src/web/browser-publish-preflight-ui.ts](../src/web/browser-publish-preflight-ui.ts) | 差异/关键调用链 | 接管和归还都携带最新账号/范围/版本，提交仍单独确认 | H6 |
-| 081 | [src/web/operations-evidence-http.ts](../src/web/operations-evidence-http.ts) | 差异/关键调用链 | 本机同源、只读方法、限长 JSON、明确原计划续接 | H9 |
-| 082 | [src/web/operations-evidence-ui.ts](../src/web/operations-evidence-ui.ts) | 差异/关键调用链 | 保存覆盖不升级全量；历史/当前输入分开；具体原范围确认 | H9 |
+| 081 | [src/web/operations-evidence-http.ts](../src/web/operations-evidence-http.ts) | 差异/关键调用链及HTTP | 本机同源、只读方法、限长JSON、明确原计划续接 | H9；C2保存指标及一次原计划续接 |
+| 082 | [src/web/operations-evidence-ui.ts](../src/web/operations-evidence-ui.ts) | 差异/关键调用链及原生交互 | 保存覆盖不升级全量；具体原范围确认 | H9；C2指标回显/确认链；截图BLOCKED |
 | 083 | [src/web/research-evidence-http.ts](../src/web/research-evidence-http.ts) | 差异/关键调用链 | 只读方法、原研究 URL、正文转义与 CSP，不重新采集 | H3,H11 |
 | 084 | [src/web/server.ts](../src/web/server.ts) | 差异/关键调用链 | 默认拒绝执行工厂、只读接线、参考验证器注入与发布确认字段 | H3,H6,H7,H9,H11 |
 | 085 | [src/web/workbench-ui.ts](../src/web/workbench-ui.ts) | 差异/关键调用链 | 仅采集状态不暗示摘要生成；保存正文链接与不重采说明 | H2,H3 |
@@ -147,7 +161,7 @@
 | 112 | [tests/u45-workbench-review-fixture.ts](../tests/u45-workbench-review-fixture.ts) | 结构/边界/证据声明 | 原工作台只读证据与具体续接；固定数据、HTTP/点击分层 | H9 |
 | 113 | [tests/u45-workbench-review-isolated.test.mjs](../tests/u45-workbench-review-isolated.test.mjs) | 结构/边界/证据声明 | 原工作台只读证据与具体续接；固定数据、HTTP/点击分层 | H9 |
 
-## 本轮新增 3 项
+## C1 新增 3 项
 
 | 编号 | 文件 | 复核深度 | 审查焦点与结果 | 关联运行证据 |
 | --- | --- | --- | --- | --- |
@@ -155,13 +169,21 @@
 | N2 | [scripts/run-pr1-final-review.mjs](../scripts/run-pr1-final-review.mjs) | 本轮源码/执行 | 保存指标与 Go 本地文件补漏；固定服务、新文件、零采集/模型 | C1 |
 | N3 | [tests/pr1-final-review.test.ts](../tests/pr1-final-review.test.ts) | 本轮源码/执行 | 保存指标与 Go 本地文件补漏；固定服务、新文件、零采集/模型 | C1 |
 
+## C2 新增 3 项
+
+| 编号 | 文件 | 复核深度 | 审查焦点与结果 | 关联运行证据 |
+| --- | --- | --- | --- | --- |
+| N4 | [scripts/run-pr1-metrics-integration.mjs](../scripts/run-pr1-metrics-integration.mjs) | 本轮运行器静态/实际退出 | 新会话、净化env、单专项、子进程与最终回执 | C2 |
+| N5 | [tests/pr1-metrics-integration-fixture.ts](../tests/pr1-metrics-integration-fixture.ts) | 本轮源码/实际DB与HTTP | 原Prisma/服务/路由、固定读取、数据篡改及应用重启 | C2 |
+| N6 | [tests/pr1-metrics-integration-isolated.test.mjs](../tests/pr1-metrics-integration-isolated.test.mjs) | 本轮实际执行 | 新空库、HTTP断言、浏览器交互与后端状态交叉核验 | C2；截图BLOCKED |
+
 ## 明确剩余未验收项
 
 | 编号 | 尚缺证据 | 当前边界与下一步 |
 | --- | --- | --- |
 | R1 | 实际配置入口、Node/Ego CLI/SDK/宿主的取消/超时与异常断连 | H13 只回收直接工作进程，后代/宿主动作可能仍存在；remoteActionsRolledBack=false，不自动终止其他 Space 或恢复旧许可 |
-| R2 | 长期 worker 浸泡、进程重启/多执行器与实际 DB 组合运行 | 本轮无租约 DB 查询；H13 是确定性计时器与固定服务，stop 不强制取消当前一步；不能视为长期运行验收 |
-| R3 | 当前组合源码的 Prisma/HTTP/浏览器回归 | F1 共享指标路径改变；旧 H8/H9/H10 及其他专项未重跑，须另选一个相关定向包逐轮补证，不能全量批跑冒充本轮结果 |
+| R2 | 常驻 worker 浸泡、多执行器与实际 DB 组合运行 | C2有原计划步骤/租约查询及应用重启；未启动常驻worker、多执行器或长期浸泡。H13仍仅确定性计时器，stop不强制取消当前一步 |
+| R3 | 共享指标之外的当前组合回归及截图视觉 | C2已完成指标切片的实际Prisma/HTTP/原生交互23项；截图执行截止仍BLOCKED，其他H8/H9/H10等路径未重跑，不扩称全部U1–U5或全路径通过 |
 | R4 | U1 真人登录/验证码后归还原会话 | 固定自有页成功不证明真人归还；账号与实际验证由用户处理，旧句柄/权限不自动恢复 |
 | R5 | U2 实际模型推理、媒体外发、音频与费用 | 模型保持 aihubmix/deepseek-v4.1-flash；音频 NOT_OBSERVED、费用 UNKNOWN，不自动发素材/调用模型/计费或切模型 |
 | R6 | U3 真实编辑态、真实上传/提交与可信作品回执 | 真实编辑态仍 BLOCKED；本机文件状态替身不能证明上传，原成片占位不自动释放，预检/归还不等于发布授权 |

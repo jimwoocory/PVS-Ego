@@ -8,6 +8,7 @@ import type { AgentCapability, AgentCapabilityCatalog, AgentCapabilityContext } 
 import type { BusinessStage, CapabilityEffect, CapabilityResult, CycleEvidence } from "../../domain/agent-cycle.js";
 import { hashValue, sha256Bytes } from "../../domain/hashing.js";
 import { DomainValidationError } from "../../domain/validation.js";
+import {assertSavedMetricSnapshot} from "./douyin-read-evidence-audit.js";
 import { creativeBatchSchema, type CreativeBatch } from "../../domain/schemas.js";
 import { smartRunOptionsSchema, type SmartGenerationRun } from "../../domain/smart-generation.js";
 import { publishProviderTypeSchema } from "../../domain/publish.js";
@@ -573,14 +574,19 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
 
   async snapshot(projectId: string): Promise<Record<string, unknown>> {
     const w = await this.workspace(projectId);
-    let feedbackReadError=false,insightReadError=false,scheduleReadError=false,artifactReadError=false;
+    let feedbackReadError=false,insightReadError=false,scheduleReadError=false,artifactReadError=false,metricReadError=false;
     const [research, runs, final, preference, packages, receipts, binding, artifacts, feedback] = await Promise.all([
       this.d.research.pageData(projectId), this.d.smartGeneration.list(projectId), this.d.finalOutput.latestAssembly(projectId), this.d.publishRepo.getPreference(projectId),
       this.d.publishRepo.listPackages(projectId), this.d.publishRepo.listReceipts(projectId), this.d.opsRepo.latestWorkBinding(projectId, { preferBound: true }),
       this.d.artifacts.listByProject(projectId).catch(()=>{artifactReadError=true;return [];}), this.d.feedback.context(projectId).catch(()=>{feedbackReadError=true;return [];})
     ]);
     const [snapshots, comments, drafts, insight] = binding?.awemeId ? await Promise.all([
-      this.d.opsRepo.listMetricSnapshots({ projectId, awemeId: binding.awemeId, limit: 30 }), this.d.opsRepo.listComments({ projectId, awemeId: binding.awemeId, limit: 50, order: "desc" }),
+      (async()=>{try{
+        if(!binding.opsAccountUid)throw new DomainValidationError("原指标账号范围缺失");
+        const saved=await this.d.opsRepo.listMetricSnapshots({projectId,awemeId:binding.awemeId!,limit:30});
+        for(const item of saved)assertSavedMetricSnapshot(item,{projectId,bindingId:binding.id,awemeId:binding.awemeId!,opsAccountUid:binding.opsAccountUid});
+        return saved;
+      }catch{metricReadError=true;return [];}})(), this.d.opsRepo.listComments({ projectId, awemeId: binding.awemeId, limit: 50, order: "desc" }),
       this.d.opsRepo.listLatestReplyDrafts({ projectId, awemeId: binding.awemeId }), this.d.opsRepo.latestInsight(projectId, binding.awemeId).catch(()=>{insightReadError=true;return null;})
     ]) : [[], [], [], null] as const;
     const collections = this.d.collections ? await this.d.collections.list(projectId) : [];
@@ -605,7 +611,7 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
         finalAssemblyId: p.finalAssemblyId, finalArtifactId: p.finalArtifactId, finalArtifactHash: p.finalArtifactHash })), receipts },
       operations: { binding, replyParents: savedParents.filter(c => (c.replyCount===undefined||c.replyCount > 0)).map(c => ({ cid: c.cid, replyCount: c.replyCount })),
         replyParentIndex: { savedTopLevelCount: savedParents.length, limit: 1000, truncated: savedParents.length === 1000 },
-        snapshots, collections, schedules,scheduleReadError,insightReadError, comments: comments.map(c => ({ id: c.id, cid: c.cid, parentCid: c.parentCid, text: c.text, replyCount: c.replyCount, category: c.category, contentHash: c.contentHash })), drafts, insight },
+        snapshots, collections, schedules,scheduleReadError,insightReadError,metricReadError, comments: comments.map(c => ({ id: c.id, cid: c.cid, parentCid: c.parentCid, text: c.text, replyCount: c.replyCount, category: c.category, contentHash: c.contentHash })), drafts, insight },
       feedback,feedbackReadError,artifactReadError, evidenceArtifacts: artifacts.filter(a => a.relativePath.startsWith("agent-evidence/")).map(a => ({ id: a.id, sha256: a.sha256, integrityStatus: a.integrityStatus })) };
   }
   async fingerprint(projectId: string, capabilityId?: string, input?: Record<string, unknown>) {
