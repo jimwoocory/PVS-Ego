@@ -2,17 +2,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
-const root=path.resolve(fileURLToPath(new URL('..',import.meta.url)));
+import {root,confined} from './isolation-policy.mjs';
 const args=process.argv.slice(2);
 if(args.length!==4||args[0]!=='--go'||args[2]!=='--ego-root'||!path.isAbsolute(args[1])||!path.isAbsolute(args[3]))throw Error('EXPLICIT_GO_AND_EGO_ROOT_REQUIRED');
-const location=JSON.parse(fs.readFileSync(path.join(root,'.runtime/go-bridge-location.json'),'utf8'));
-const base=location.session;location.session=path.join(base,'go-bridge-attempt-'+randomUUID());
-for(const dir of ['evidence','home/local','home/roaming'])fs.mkdirSync(path.join(location.session,dir),{recursive:true});
-fs.writeFileSync(path.join(root,'.runtime/go-bridge-latest-attempt.json'),JSON.stringify({base,session:location.session},null,2));
+const location={session:confined(path.join(root,'.runtime','go-bridge-attempt-'+randomUUID()))};
+for(const dir of ['evidence','home/local','home/roaming','go-cache'])fs.mkdirSync(path.join(location.session,dir),{recursive:true});
+fs.writeFileSync(confined(path.join(root,'.runtime/go-bridge-latest-attempt.json')),JSON.stringify(location,null,2));
 const env={};for(const k of ['SystemRoot','WINDIR','COMSPEC','PATHEXT'])if(process.env[k])env[k]=process.env[k];
-Object.assign(env,{PATH:path.dirname(process.execPath),HOME:location.session,USERPROFILE:location.session,TEMP:location.session,TMP:location.session,GOTELEMETRY:'off',GOTOOLCHAIN:'local',GOPROXY:'off',GOSUMDB:'off',GOWORK:'off',GOENV:'off',GOCACHE:path.join(base,'go-cache'),GOPATH:path.join(location.session,'go-path'),PVS_GO_TEST_SESSION:location.session,PVS_GO_TEST_EGO_ROOT:fs.realpathSync(args[3]),PVS_GO_TEST_BINARY:path.join(location.session,'go-ego-bridge.exe')});
+Object.assign(env,{PATH:path.dirname(process.execPath),HOME:location.session,USERPROFILE:location.session,TEMP:location.session,TMP:location.session,GOTELEMETRY:'off',GOTOOLCHAIN:'local',GOPROXY:'off',GOSUMDB:'off',GOWORK:'off',GOENV:'off',GOCACHE:path.join(location.session,'go-cache'),GOPATH:path.join(location.session,'go-path'),PVS_GO_TEST_SESSION:location.session,PVS_GO_TEST_EGO_ROOT:fs.realpathSync(args[3]),PVS_GO_TEST_BINARY:path.join(location.session,'go-ego-bridge.exe')});
 async function run(executable,argv,label,cwd=root){return new Promise((resolve,reject)=>{const log=fs.createWriteStream(path.join(location.session,'evidence',label+'.log'),{flags:'wx'});const c=spawn(executable,argv,{cwd,env,windowsHide:true,stdio:['ignore','pipe','pipe']});c.stdout.on('data',b=>{log.write(b);process.stdout.write(b);});c.stderr.on('data',b=>{log.write(b);process.stderr.write(b);});c.once('error',reject);c.once('close',(code,signal)=>{log.end();fs.writeFileSync(path.join(location.session,'evidence',label+'-exit.json'),JSON.stringify({pid:c.pid,code,signal}));code===0?resolve():reject(Error(label+'_FAILED_'+code));});});}
 try {
  await run(args[1],['build','-trimpath','-buildvcs=false','-o',env.PVS_GO_TEST_BINARY,'.'],'go-build',path.join(root,'execution/go-ego-bridge'));

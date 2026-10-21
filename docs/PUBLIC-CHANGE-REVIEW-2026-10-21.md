@@ -137,3 +137,15 @@ Tabbit完成原生导航、工作台证据链接、零值/不可见显示、取�
 最终构建退出0，专项 **11 PASS / 0 FAIL**（10子项加父项）、套件退出0，4个应用进程正常退出0。连续原生检查至少900秒，启动到最终退出窗口913850ms（包含停止/收尾），全套单调时长925572.5259ms（包含建数）。新增15批/120条任务最终服务，智能任务最终1151条、Agent160条；172次采样，worker RSS峰值约112.8MiB、heapUsed峰值约37.9MiB，预算及阶段增长断言通过。预期活租约拒绝、ENOENT、检查点拒写与SQLite锁错误保留；有限资源检查不称无泄漏。130表项与文件集合、14候选公开范围、11源码摘要及原guard再次核验。
 
 ALL索引分支独立运行、小时/天级浸泡、万级以上规模、生产吞吐SLO、完整OS句柄审计、真实设备EIO/ENOSPC/断电和跨平台仍未验收。其他真实宿主、U1真人、U2模型音频费用、U3真实编辑态BLOCKED、U4新片采集、U5真实采用、截图BLOCKED及完整CI/独立审核缺口保留。无真实模型/平台/HTTP/浏览器/Go/SDK/宿主调用，无外发/付费/上传/发布/回复；模型与隔离授权边界保持，未合并部署。
+
+## PR #1 CI 与独立代码审查 C5
+
+从 `d224c69` 开始补齐 CI。新增Windows2022/Node22.23.2单一检查，在PR及main推送时运行：锁定依赖安装且禁生命周期脚本、显式准备Prisma引擎、创建新空库及加固6个客户端入口、构建、`npm test`边界套件。官方Actions固定完整SHA，只有contents:read，不保留checkout凭据，不使用业务secret、缓存业务状态或上传原始证据，无合并部署步骤。首次提交 `a5fbda6` 的[GitHub Actions](https://github.com/jimwoocory/PVS-Ego/actions/runs/39553397512)已实际success，日志确认27 PASS/0 FAIL且流程正常退出；检查使用GitHub自动生成的合并候选代码，不改变PR的未合并状态。
+
+本地从受版本控制的代码另建副本，全新网络安装19个锁定包，未复制原配置、DB、projects或浏览器账号。首次同流程27/27，随后修复F9并仅复跑同一边界套件，最终 **27 PASS/0 FAIL、退出0、10551.2004ms**；次数不累计。本轮没有修改TypeScript，已有构建退出0。原始本地回执保留忽略目录，公开集合新增workflow及原边界套件两项，130→132。
+
+用户要求的独立审查由全新上下文审查者完成，保持继承模型。静态覆盖生产关键差异与调用链、Go协议/退出、Agent取消、worker分页/恢复、Prisma租约/事务、计划续接、研究缓存、媒体证据、HTTP/UI及CI/bootstrap；公开候选凭据模式扫描未发现实际泄漏。新增测试只重点核验隔离、故障和断言路径，没有逐条验证全部断言，审查者未运行测试/服务，也未读取配置、DB或私有证据。未确认其他P0/P1；发现下述P2并静态复核修复及回归。该独立代码审查**不等于GitHub账号的Approve**。
+
+**F9/P2：Go专项入口依赖未发布的历史位置文件。** `run-go-bridge-isolated`、`run-go-research-isolated`、`run-go-u1-session`无条件读取忽略目录中的旧位置JSON，仓库无生成入口，干净checkout即使setup/build也会提前ENOENT。现在创建本仓库独立UUID会话、缓存及尝试回执，路径通过原confined核验；不读取旧状态、不共享历史缓存、不改变原业务守卫或人工许可。边界套件的迁移子项用明确不存在的编译器检查三个runner：新会话/cache已建立、失败原因确为该编译器ENOENT、无final PASS。该负例不会启动Go/Ego或宿主，不能充当这三个完整Go专项的重新验收。
+
+最新head需核验[对应CI检查](https://github.com/jimwoocory/PVS-Ego/pull/1/checks)。非Windows、完整业务组合/真实Go专项、其他R1–R8、正式GitHub批准仍缺；U3真实编辑态和截图BLOCKED保留。模型仍为aihubmix/deepseek-v4.1-flash，音频NOT_OBSERVED、费用UNKNOWN；没有业务模型/平台调用、素材外发、付费生成、真实上传/发布/回复、原服务操作、合并或部署。

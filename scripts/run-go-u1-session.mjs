@@ -3,15 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {randomUUID,createHash} from 'node:crypto';
-import {root} from './isolation-policy.mjs';
+import {root,confined} from './isolation-policy.mjs';
 const args=process.argv.slice(2);
 if(args.length!==4||args[0]!=='--go'||args[2]!=='--ego-root'||!path.isAbsolute(args[1])||!path.isAbsolute(args[3]))throw Error('EXPLICIT_LOCAL_GO_AND_EGO_REQUIRED');
-const session=path.join(root,'.runtime','go-bridge-u1-session-'+randomUUID()),businessSession=path.join(root,'.runtime/isolation-sessions','go-u1-session-'+randomUUID());
-for(const base of [session,businessSession])for(const dir of ['evidence','projects','tmp','home/local','home/roaming'])fs.mkdirSync(path.join(base,dir),{recursive:true});
-fs.writeFileSync(path.join(root,'.runtime/go-u1-session-active.json'),JSON.stringify({session,businessSession},null,2));
+const session=confined(path.join(root,'.runtime','go-bridge-u1-session-'+randomUUID())),businessSession=confined(path.join(root,'.runtime/isolation-sessions','go-u1-session-'+randomUUID()));
+for(const base of [session,businessSession])for(const dir of ['evidence','projects','tmp','home/local','home/roaming','go-cache'])fs.mkdirSync(path.join(base,dir),{recursive:true});
+fs.writeFileSync(confined(path.join(root,'.runtime/go-u1-session-active.json')),JSON.stringify({session,businessSession},null,2));
 const env={};for(const k of ['SystemRoot','WINDIR','COMSPEC','PATHEXT'])if(process.env[k])env[k]=process.env[k];
-const cached=JSON.parse(fs.readFileSync(path.join(root,'.runtime/go-bridge-location.json'),'utf8')).session;
-Object.assign(env,{PATH:path.dirname(process.execPath),HOME:session,USERPROFILE:session,TEMP:path.join(session,'tmp'),TMP:path.join(session,'tmp'),GOTELEMETRY:'off',GOTOOLCHAIN:'local',GOPROXY:'off',GOSUMDB:'off',GOWORK:'off',GOENV:'off',GOCACHE:path.join(cached,'go-cache'),GOPATH:path.join(session,'go-path'),PVS_GO_U1_SESSION:session,PVS_GO_U1_BUSINESS:businessSession,PVS_GO_U1_EGO_ROOT:fs.realpathSync(args[3])});
+Object.assign(env,{PATH:path.dirname(process.execPath),HOME:session,USERPROFILE:session,TEMP:path.join(session,'tmp'),TMP:path.join(session,'tmp'),GOTELEMETRY:'off',GOTOOLCHAIN:'local',GOPROXY:'off',GOSUMDB:'off',GOWORK:'off',GOENV:'off',GOCACHE:path.join(session,'go-cache'),GOPATH:path.join(session,'go-path'),PVS_GO_U1_SESSION:session,PVS_GO_U1_BUSINESS:businessSession,PVS_GO_U1_EGO_ROOT:fs.realpathSync(args[3])});
 async function run(executable,argv,name,cwd=root){await new Promise((resolve,reject)=>{
  const log=fs.createWriteStream(path.join(session,'evidence',name+'.log'),{flags:'wx'});let p;
  try{p=spawn(executable,argv,{cwd,env,windowsHide:true,stdio:['ignore','pipe','pipe']});}catch(error){log.end(error.message);reject(error);return;}
