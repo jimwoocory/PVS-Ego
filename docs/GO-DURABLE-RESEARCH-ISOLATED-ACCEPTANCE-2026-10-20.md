@@ -70,3 +70,11 @@ npm run test:go-research -- --go <本机go.exe绝对路径> --ego-root <现有eg
 新库由本仓库迁移SQL创建，未复制已有数据库；不对现有库迁移或重置。故障端口和真实Go集成的结论分别保留。
 
 本机位置指针：`.runtime/go-durable-active.json`、`.runtime/go-research-active.json`、`.runtime/lifecycle-durable-location.json`。原始事件、进程日志、空白库、浏览器Profile、JSON正文和失败尝试仅留`.runtime`，不进入Git。最新汇总为 `.runtime/go-durable-research-checkpoint-20261020.json`；各阶段checkpoint保留独立证据。
+
+## 2026-10-21 修复后 Go 研究入口复验 C7
+
+以上为2026-10-20历史分轮记录。F9去除私有历史位置依赖后，本次从 `5bfa7e0` 构建退出0，仅运行 `test:go-research` 完整专项，**6/6、退出0、8771.6239ms**。Go1.26.9、原CLI/SDK、新宿主/profile、此次新会话与缓存、固定本机动态nonce页面、迁移新建SQLite和实际Prisma均参与；不复制旧业务状态或账号。
+
+实际保存1131字节JSON、1条Evidence；共40个桥事件、1个document、3次固定GET。篡改拒绝并恢复、跨scope拒绝、缓存/同run幂等、未授权摘要/搜索拒绝、业务进程重启后证据与摘要一致且不重采、宿主断连新采集失败且不虚构证据均通过。Go构建和套件退出0；宿主、Go桥、重启前后业务进程4个应用子进程closed/exit0。最终回执8项源码摘要匹配，守卫未改；新库模型provider/execution/generationAttempt均0，模型/搜索调用0。
+
+本轮没有新增已确认产品缺陷或产品源码变更；没有重跑本报告历史持久性套件、C6原工作台点击或其他专项。没有截图、真人归还、生产工厂接线、真实平台或模型，相关BLOCKED/UNKNOWN保留。下一轮仅优先修复后 `test:go-u1-session` 完整回归。原始回执/库/宿主profile继续忽略排除，公开范围与限制见[最新分轮记录](PUBLIC-CHANGE-REVIEW-2026-10-21.md#pr-1-修复后-go-研究完整隔离回归-c7)；不合并部署。

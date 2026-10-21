@@ -161,3 +161,13 @@ ALL索引分支独立运行、小时/天级浸泡、万级以上规模、生产�
 失败分开保留：Tabbit在新标签创建前出现`Target.createTarget`协议错误，诊断确认任务idle/无拥有标签后正常finish；未在其上重放页面操作。首次内置浏览器取消因旧AX引用失效且错过有限采样窗口，状态实际完成而非取消，该整轮明确记录 **7 PASS/2 FAIL、退出1**，无final PASS。第二轮使用当前语义控件，在一次调用中启动、等待非零采样并取消；没有延长时限、放松断言或修改守卫，只复跑同一完整套件取得最终9/9。内置浏览器截图目视检查成功但没有保存交付图片，不能覆盖历史截图BLOCKED项。
 
 修复后 `test:go-research`、`test:go-u1-session` 完整回归仍待下一轮依次验证；本轮不运行第二个本地专项。既有GitHub CI继续按提交自动检查Windows构建/边界套件，不将其计入Go专项通过数，也不自动加入交互式Go/平台测试。非Windows、真实业务宿主/DB接线、进程树回收、小时/天级/设备故障、U1真人、U2模型音频费用、U3真实编辑态BLOCKED、U4真实新片采集、U5实际采用及正式GitHubApprove仍未验收。模型保持aihubmix/deepseek-v4.1-flash，音频NOT_OBSERVED、费用UNKNOWN；无模型推理、真实平台、素材外发、付费生成、上传/发布/回复、原服务操作、合并或部署。
+
+## PR #1 修复后 Go 研究完整隔离回归 C7
+
+以 `5bfa7e0` 为起点，本轮仅运行 `test:go-research` 一个完整定向套件。构建退出0，首次完整运行 **6 PASS/0 FAIL（5子项加父项）、退出0、8771.6239ms**，不累加C6或历史通过数。使用显式本地Go1.26.9和既有Ego代码，运行器创建独立UUID会话与Go缓存、新宿主profile和业务会话；数据库由仓库迁移SQL新建空白，不复制原配置、DB、项目或账号，不依赖旧位置JSON。
+
+实际Go→原Node CLI/SDK→新Ego实例，在固定本机nonce页面等待动态DOM就绪，经原Agent确认/版本/上下文/幂等门禁，调用实际ResearchService与Prisma仓库保存正文、Evidence和Artifact。JSON正文1131字节、1个document事件、40个桥事件、固定页面3次GET。核验文件SHA/正文内容摘要、缓存不重采、篡改拒绝后恢复、跨项目/来源/run拒绝、同run幂等、未授权摘要/搜索和DEEP入口拒绝。关闭并重启业务进程后同一证据/文件摘要保留且0次新桥调用。宿主真实退出后新采集失败，不重试、不复用旧捕获或虚构Evidence。
+
+最终新库有2个研究run、1条Evidence、2条Artifact（1条READY及1条断连后保留PENDING占位，后者不当成完成证据），provider配置、模型execution、generationAttempt均0；模型调用0、搜索调用0，brief为NOT_GENERATED_NOT_AUTHORIZED，真人采用false。Go构建、套件及宿主/Go桥/两次业务进程均观察退出0，4个应用子进程closed=true；最终回执在套件退出后生成，8个源码摘要匹配当前文件，原守卫SHA不变。
+
+本轮没有新确认的产品缺陷或产品源码更改，公开范围仍132项，只更新4份验收说明。修复后 `test:go-u1-session` 完整隔离回归仍未运行，下一轮优先；C6及其他旧专项不重跑。此轮自动驱动Ego读取合成页，没有进行原工作台HTTP/浏览器原生点击、截图或真人登录归还；不能替代生产能力接线、真实网站研究、真实模型/产品事实采用或平台E2E。既定GitHub CI按提交独立运行边界检查，不计入Go6/6。非Windows/完整组合、进程树回收、小时天级/物理I/O、U1真人、U2模型音频费用、U3真实编辑态BLOCKED、U4新片真实采集、U5真实采用、历史截图BLOCKED及正式GitHubApprove仍保留。模型保持aihubmix/deepseek-v4.1-flash、音频NOT_OBSERVED、费用UNKNOWN；无素材外发、付费生成、真实上传/发布/回复、原服务停止重启、合并或部署。
