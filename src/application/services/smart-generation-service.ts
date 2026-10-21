@@ -8,7 +8,7 @@ import {
   smartRunOptionsSchema, smartRunSchema, runnableSmartStatuses, closedSmartStatuses,
   type SmartGenerationRun, type SmartStage
 } from "../../domain/smart-generation.js";
-import type { SmartRunRepository } from "../ports/smart-run-repository.js";
+import type { SmartRunRepository, SmartWorkerPageQuery } from "../ports/smart-run-repository.js";
 import { SmartFlowPause, type SmartProduction } from "../ports/smart-production.js";
 import { withSerialOperation } from "./serial-operation.js";
 import { postProductionSettingsSchema } from "../../domain/auto-edit.js";
@@ -105,6 +105,12 @@ export class SmartGenerationService {
 
   get(projectId: string, id: string) { return this.repo.get(projectId, id); }
   list(projectId?: string) { return this.repo.list(projectId); }
+  async listWorkerPage(query:SmartWorkerPageQuery){
+    if(this.repo.listWorkerPage)return this.repo.listWorkerPage(query);
+    // Compatibility for in-memory ports; the Prisma worker uses its dedicated index.
+    const runs=(await this.repo.list()).filter(r=>(!query.afterId||r.id>query.afterId)&&(query.mode==="ALL"||query.legacyScope?.projectId===r.projectId&&query.legacyScope.runId===r.id||r.autoAdvanceGrant?.projectId===r.projectId&&r.autoAdvanceGrant.runId===r.id)).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0).slice(0,30);
+    return {runs,...(runs.length===30?{nextAfterId:runs.at(-1)!.id}:{})};
+  }
 
   private async zeroImageQuote(run:SmartGenerationRun){
     if(!this.production.quoteCanvasImages||!run.canvasBinding||!run.script||!run.productionPlan||!run.assetPaidScope||

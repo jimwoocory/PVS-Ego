@@ -53,6 +53,7 @@ export function startSmartGenerationWorker(service: SmartGenerationService, opti
   if (policy.mode === "DISABLED") return () => {};
   let stopped = false, working = false;
   let startupRecovered = false;
+  let afterId:string|undefined;
   const tick = async () => {
     if (stopped || working) return;
     working = true;
@@ -70,19 +71,20 @@ export function startSmartGenerationWorker(service: SmartGenerationService, opti
       }
       if (stopped) return;
       // A scoped launch must not list, recover or mutate historical runs.
-      const originalRuns = policy.mode === "SCOPED"
-        ? [await service.get(policy.scope.projectId, policy.scope.runId)].filter(
+      const page = policy.mode === "SCOPED"
+        ? {runs:[await service.get(policy.scope.projectId, policy.scope.runId)].filter(
           (run): run is NonNullable<typeof run> => Boolean(run)
-        )
-        : await service.list();
-      for (const original of originalRuns) {
+        ),nextAfterId:undefined}
+        : service.listWorkerPage ? await service.listWorkerPage({afterId,mode:policy.mode,...(policy.mode==="MANAGED"?{legacyScope:policy.legacyScope}:{})}) : {runs:await service.list(),nextAfterId:undefined};
+      for (const original of page.runs) {
         if (stopped) break;
         // Reading the task index never grants execution permission to old runs.
         if (!canWorkerAdvanceRun(policy, original.projectId, original.id, original.autoAdvanceGrant)) continue;
         if (policy.mode === "MANAGED" || policy.mode === "ALL") {
           // Owners can die after startup. Recheck only a run this policy may
           // advance; the service leaves every live or unknown OS owner intact.
-          await service.recoverAbandonedScoped(original.projectId, original.id);
+          try{await service.recoverAbandonedScoped(original.projectId, original.id);}
+          catch(error){options.onError?.(error);continue;}
         }
         if (stopped) break;
         let run = original;
@@ -94,6 +96,7 @@ export function startSmartGenerationWorker(service: SmartGenerationService, opti
           if (externalPoll) break;
         }
       }
+      if(!stopped)afterId=page.nextAfterId;
     } catch (error) { options.onError?.(error); }
     finally { working = false; }
   };

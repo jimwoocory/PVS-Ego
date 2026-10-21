@@ -1,8 +1,8 @@
 # PR #1 逐文件审查覆盖清单
 
-审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录代替文件**。C1 新增3项、C2新增3项、C3新增3项，当前范围为 **122 项**。新增项在末表单独列出，已修改的原文件仍计入原113项。
+审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录代替文件**。C1/C2/C3各新增3项，C4再新增8项（5个此前未出现在PR差异中的既有生产文件、3个新专项文件），当前范围为 **130 项**。新增项在末表单独列出，已修改的原文件仍计入原113项。
 
-这是指定深度的静态审查与证据索引，**不是122个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。原生Go前轮修复结合未变源码与当时证据复核；worker当前运行以C3为准。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
+这是指定深度的静态审查与证据索引，**不是130个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。原生Go前轮修复结合未变源码与当时证据复核；worker当前运行以C4为准。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
 
 ## C1 前轮补漏与限定运行证据
 
@@ -37,6 +37,23 @@
 最终原生worker观察窗口 **243107ms**；自然到期慢响应等待 **180362ms** 后被另一执行器接续，未改时钟、TTL或到期列；两次原计划指标读取相隔 **65108ms**。预期租约竞争拒绝记录保留，未发现其他worker错误，单进程运营tick最大并发1。全套含启动/收尾约245秒；这些数值不表示所有worker全程没有停止/重启，停止和重启本身也是用例。
 
 数分钟有界运行只证明上述调度、实际数据库竞争和恢复切片，仍缺小时/天级浸泡、大量任务公平性、生产负载、网络/磁盘故障与真实执行端取消等证据；stop只阻止后续调度，不强制取消当前一步。原模型及隔离守卫保持，音频NOT_OBSERVED、费用UNKNOWN。
+
+## C4 worker 稳定性、规模、公平性与本地 I/O 专项
+
+以 `9e049da` 为起点，本轮唯一套件 `npm run test:pr1-worker-scale`。新空库、实际Prisma仓库和原智能制作/Agent服务与worker，双独立执行器、15分钟真实定时器。起始1,024条智能制作记录（480可推进、32活拥有者、128取消终态、384未授权）及160条Agent记录（96到期、32活拥有者、32未来唤醒），运行期间持续注入新合成任务。
+
+最终构建退出0；**11/11（10子项加父项）、套件退出0**，4个应用进程均正常退出0。原生持续检查至少900秒，启动到最终退出记录窗口913850ms（含停止/收尾），完整套件单调计时925572.5259ms（含建数）。15批共120条新增任务最终均到达预期人工审阅状态，最终智能任务1151条、Agent160条；2条真实本地文件错误保持FAILED，其余未授权/活拥有者/未来唤醒对照未变。
+
+两个worker各86次、共172次采样；RSS峰值分别118304768和117665792字节，heapUsed峰值39102512和39724088字节。资源预算与阶段增长断言通过，活动资源采样不等于完整OS句柄审计。预期ENOENT、LEASE_BUSY、检查点拒写和SQLite锁错误计数全部保留，没有把错误日志清空成“无错误”；11项当前源码摘要核验一致。
+
+- **F6 / P2 已修复**：智能worker使用面向页面的最新200条列表，较新的取消或未授权记录可挡住更早的可执行任务。新增专用30条有界索引，先筛选可执行状态或待恢复租约，以及MANAGED原授权，再按稳定ID游标轮转；领域权限仍逐任务复核，普通展示列表不变。待人工审阅后进程退出的租约也保留恢复入口，只清理死亡拥有者，待审正文不变且不触发来源读取。进程重启从头扫描，不能把本地游标当业务许可。
+- **F7 / P2 已修复**：Agent前30条未来唤醒或活拥有者可使后续到期任务饥饿。专用索引先排除未来唤醒，再以30条ID游标轮转；活拥有者仍由原租约保护，不抢占、改唤醒时间或自动确认。
+- **F8 / P2 已修复**：单任务死亡租约检查异常原先会中断整轮列表。现在保留该错误，继续审阅当前策略允许的其他任务，失败任务在下一轮扫描重试。本轮以恢复端口中的真实本地ENOENT验证这个分支，不把它称为真实设备故障。
+- 实际SQLite独占锁触发读取/写入错误，解锁后原worker恢复；指定检查点触发器在SQLite事务中拒绝写入，核对版本和检查点全部回滚，解除后恢复。缺文件与向目录写入保留真实文件错误和FAILED状态，其他任务继续。触发器是逻辑写入失败注入，不是断电或磁盘耗尽；重复的失败前本地来源读取不称外部请求恰好一次。
+- MANAGED原生运行跨多页处理积压，活租约、未授权记录及未来唤醒记录逐字节保持；每分钟继续送入8条新合成任务。每轮最多30条，队列扩大后单任务轮询间隔随页数增加，不承诺固定响应延迟或严格FIFO。采样进程内存、活动资源和页大小，检查预算与阶段增长，不将有限采样称无内存泄漏或生产吞吐SLO。
+- 首轮夹具错误地把无成片证据记录标COMPLETED，原领域校验正确拒绝；改为合法CANCELLED并构建后只复跑同一套件。中间15分钟11/11后，补入待审死亡租约兼容路径及实际退出案例，再构建并仅复跑同一套件。失败、各轮退出和源码摘要分别保留，不累计通过数。C1/C2/C3/H历史专项均未重跑，尤其C3自然租约/重启与C2浏览器证据不能称当前组合已全部重验。
+
+本轮没有真实模型、平台、HTTP/浏览器、Go/SDK/宿主调用，无付费生成/外发/上传/发布/回复。ALL及MANAGED旧精确范围索引分支、备用内存端口、万级以上任务、小时/天级浸泡、生产SLO、OS文件句柄完整审计、真实设备EIO/ENOSPC/断电及跨平台仍缺独立运行证据；模型、默认禁用与人工门禁保持。
 
 ## 历史证据索引
 
@@ -115,7 +132,7 @@
 | 052 | [src/application/ports/product-flow-repository.ts](../src/application/ports/product-flow-repository.ts) | 差异/关键调用链 | 只读核验历史版本端口，不引入写入副作用 | H9 |
 | 053 | [src/application/ports/research-provider.ts](../src/application/ports/research-provider.ts) | 差异/关键调用链 | 冻结正文/图片文件摘要与旧回执兼容边界 | H11 |
 | 054 | [src/application/ports/research-repository.ts](../src/application/ports/research-repository.ts) | 差异/关键调用链 | 持久化 collectionOnly 仅减少工作，不恢复模型许可 | H4,H12 |
-| 055 | [src/application/services/agent-cycle-service.ts](../src/application/services/agent-cycle-service.ts) | 差异/关键调用链及实际worker | 本机进度保存、活租约内取消、旧句柄恢复为未知/阻断 | H1,H2,H13；C3双worker单次保存读取与未确认门禁 |
+| 055 | [src/application/services/agent-cycle-service.ts](../src/application/services/agent-cycle-service.ts) | 差异/关键调用链及实际worker | 原确认门禁；F7到期有界游标扫描 | H1,H2,H13；C3历史；C4积压与未来唤醒/活拥有者 |
 | 056 | [src/application/services/ai-generation.ts](../src/application/services/ai-generation.ts) | 差异/关键调用链 | 参考证据与采用反馈在初次/纠错/使用规则请求前后核验 | H7,H8 |
 | 057 | [src/application/services/browser-publish-preparation-service.ts](../src/application/services/browser-publish-preparation-service.ts) | 差异/关键调用链 | 原账号/scopeHash/最新版本确认，接管归还分阶段 | H6 |
 | 058 | [src/application/services/douyin-collection-service.ts](../src/application/services/douyin-collection-service.ts) | 差异/关键调用链 | 原账号/游标续接；读取与保存前护栏传递 | H8,H10 |
@@ -133,7 +150,7 @@
 | 070 | [src/application/services/research-evidence-reader.ts](../src/application/services/research-evidence-reader.ts) | 差异/关键调用链 | 原研究归属、正文回执和保存文件；截图不宣称已验证 | H2,H3,H11 |
 | 071 | [src/application/services/research-service.ts](../src/application/services/research-service.ts) | 差异/关键调用链 | 明确仅采集模式、阻断摘要；续接识别冻结原始重定向来源 | H2,H4,H12 |
 | 072 | [src/application/services/saved-research-artifact.ts](../src/application/services/saved-research-artifact.ts) | 差异/关键调用链 | 大小上限、原研究目录、链接/稳定性/文件摘要共用核验 | H11 |
-| 073 | [src/application/services/smart-generation-worker.ts](../src/application/services/smart-generation-worker.ts) | 差异/关键调用链及原生定时器/DB | 恢复与推进串行、F5启动后死亡租约检查、停止/授权范围 | H13历史；C3实际进程竞争/死亡/活拥有者/范围 |
+| 073 | [src/application/services/smart-generation-worker.ts](../src/application/services/smart-generation-worker.ts) | 差异/关键调用链及原生定时器/DB | F5精确死租约；F6有界游标；F8逐任务恢复错误隔离 | H13/C3历史；C4 MANAGED多页/活拥有者/故障恢复 |
 | 074 | [src/domain/agent-cycle.ts](../src/domain/agent-cycle.ts) | 差异/关键调用链 | 本机执行反馈字段，不替代业务状态与授权 | H1,H2 |
 | 075 | [src/domain/douyin-feedback-validation.ts](../src/domain/douyin-feedback-validation.ts) | 差异/关键调用链 | 冻结来源、原始 ID、时间窗、覆盖计数与引用一致 | H7,H8 |
 | 076 | [src/domain/douyin-operations-schedule.ts](../src/domain/douyin-operations-schedule.ts) | 差异/关键调用链 | 读取意图协议、历史次数/检查点/父评论上限 | H8,H10 |
@@ -199,12 +216,25 @@
 | N8 | [tests/pr1-worker-db-fixture.ts](../tests/pr1-worker-db-fixture.ts) | 本轮源码/实际Prisma与worker | 原服务/原生定时器、固定观察、暂停/到期/退出故障 | C3 |
 | N9 | [tests/pr1-worker-db-isolated.test.mjs](../tests/pr1-worker-db-isolated.test.mjs) | 本轮实际执行 | 共享新空库、多进程竞争、自然TTL、确认门禁和退出核验 | C3 |
 
+## C4 新增到 PR 差异的 8 项
+
+| 编号 | 文件 | 复核深度 | 审查焦点与结果 | 关联运行证据 |
+| --- | --- | --- | --- | --- |
+| N10 | [src/adapters/db/prisma-agent-cycle-repository.ts](../src/adapters/db/prisma-agent-cycle-repository.ts) | 本轮索引差异/实际Prisma | F7先筛到期再按ID有界轮转；其余既有仓库路径非本轮全验 | C4 |
+| N11 | [src/adapters/db/prisma-smart-run-repository.ts](../src/adapters/db/prisma-smart-run-repository.ts) | 本轮索引差异/实际Prisma | F6状态/原授权在limit前过滤；事务写入回滚 | C4 MANAGED；ALL分支未独立验收 |
+| N12 | [src/application/ports/agent-cycle-repository.ts](../src/application/ports/agent-cycle-repository.ts) | 端口与兼容复核 | 可选只读worker页与稳定游标，不扩大业务权限 | C4实际Prisma实现 |
+| N13 | [src/application/ports/smart-run-repository.ts](../src/application/ports/smart-run-repository.ts) | 端口与兼容复核 | 可选有界worker索引，区分ALL/MANAGED原范围 | C4实际Prisma实现 |
+| N14 | [src/application/services/smart-generation-service.ts](../src/application/services/smart-generation-service.ts) | 新索引差异/关键调用链 | 委托Prisma索引与内存端口兼容；原人工暂停及失败落库 | C4新索引/来源暂停；非全制作链 |
+| N15 | [scripts/run-pr1-worker-scale.mjs](../scripts/run-pr1-worker-scale.mjs) | 本轮运行器/实际退出 | 新会话、净化env、原守卫、单专项与最终回执 | C4 |
+| N16 | [tests/pr1-worker-scale-fixture.ts](../tests/pr1-worker-scale-fixture.ts) | 本轮源码/实际DB与文件 | 合成积压、固定来源、活拥有者及真实本地文件错误 | C4 |
+| N17 | [tests/pr1-worker-scale-isolated.test.mjs](../tests/pr1-worker-scale-isolated.test.mjs) | 本轮实际执行 | 15分钟/规模/脉冲新任务/资源采样/SQLite锁与事务错误 | C4 |
+
 ## 明确剩余未验收项
 
 | 编号 | 尚缺证据 | 当前边界与下一步 |
 | --- | --- | --- |
 | R1 | 实际配置入口、Node/Ego CLI/SDK/宿主的取消/超时与异常断连 | H13 只回收直接工作进程，后代/宿主动作可能仍存在；remoteActionsRolledBack=false，不自动终止其他 Space 或恢复旧许可 |
-| R2 | 小时/天级worker浸泡、大量任务公平性、生产负载及I/O故障 | C3补有界原生定时器/多进程/实际共享Prisma、自然180秒到期、单次领取及实际重启；不扩称长期生产浸泡，stop不强制取消当前一步 |
+| R2 | 小时/天级浸泡、更大规模/真实负载/性能SLO与真实设备故障 | C4补15分钟、千条积压、MANAGED/Agent公平扫描及本地SQLite/文件错误；ALL索引独立运行、万级任务、设备EIO/ENOSPC/断电等仍缺。C3自然TTL/重启为历史，stop不强制取消当前一步 |
 | R3 | 共享指标之外的当前组合回归及截图视觉 | C2已完成指标切片的实际Prisma/HTTP/原生交互23项；截图执行截止仍BLOCKED，其他H8/H9/H10等路径未重跑，不扩称全部U1–U5或全路径通过 |
 | R4 | U1 真人登录/验证码后归还原会话 | 固定自有页成功不证明真人归还；账号与实际验证由用户处理，旧句柄/权限不自动恢复 |
 | R5 | U2 实际模型推理、媒体外发、音频与费用 | 模型保持 aihubmix/deepseek-v4.1-flash；音频 NOT_OBSERVED、费用 UNKNOWN，不自动发素材/调用模型/计费或切模型 |

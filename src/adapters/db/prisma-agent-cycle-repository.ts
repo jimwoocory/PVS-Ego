@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import {Prisma,type PrismaClient} from "@prisma/client";
 import type { AgentCycleRepository } from "../../application/ports/agent-cycle-repository.js";
 import type { AgentCycle } from "../../domain/agent-cycle.js";
 import { DomainValidationError } from "../../domain/validation.js";
@@ -28,6 +28,12 @@ export class PrismaAgentCycleRepository implements AgentCycleRepository {
       ? await this.db.$queryRaw<Row[]>`SELECT * FROM "AgentCycleRecord" WHERE projectId=${projectId} ORDER BY createdAt DESC LIMIT 100`
       : await this.db.$queryRaw<Row[]>`SELECT * FROM "AgentCycleRecord" WHERE status IN ('READY','RUNNING') ORDER BY updatedAt ASC LIMIT 30`;
     return rows.map(decode);
+  }
+  async listWorkerPage(now:string,afterId?:string){
+    const after=afterId?Prisma.sql`AND "id">${afterId}`:Prisma.empty;
+    const rows=await this.db.$queryRaw<Row[]>(Prisma.sql`SELECT * FROM "AgentCycleRecord" WHERE "status" IN ('READY','RUNNING')
+      AND (json_extract("dataJson",'$.nextWakeAt') IS NULL OR json_extract("dataJson",'$.nextWakeAt')<=${now}) ${after} ORDER BY "id" ASC LIMIT 30`);
+    return {cycles:rows.map(decode),...(rows.length===30?{nextAfterId:rows.at(-1)!.id}:{})};
   }
   async claim(projectId: string, id: string, owner: string) {
     return (await this.db.$executeRaw`UPDATE "AgentCycleRecord" SET leaseOwner=${owner}, leasePid=${process.pid} WHERE id=${id} AND projectId=${projectId} AND leaseOwner IS NULL`) === 1;

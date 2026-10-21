@@ -37,6 +37,11 @@ export class AgentCycleService {
   }
   async get(projectId: string, id: string) { const cycle=await this.repository.get(projectId,id);return cycle?this.localView(cycle):null; }
   async list(projectId?: string) { return (await this.repository.list(projectId)).map(cycle=>this.localView(cycle)); }
+  async listWorkerPage(afterId?:string){
+    if(this.repository.listWorkerPage)return this.repository.listWorkerPage(stamp(),afterId);
+    const cycles=(await this.list()).filter(c=>(!afterId||c.id>afterId)&&(!c.nextWakeAt||Date.parse(c.nextWakeAt)<=Date.now())).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0).slice(0,30);
+    return {cycles,...(cycles.length===30?{nextAfterId:cycles.at(-1)!.id}:{})};
+  }
 
   private async exclusive(projectId: string, id: string, fn: (cycle: AgentCycle, save: () => Promise<void>) => Promise<AgentCycle>) {
     await this.repository.recoverAbandoned(projectId,id);
@@ -256,8 +261,8 @@ export class AgentCycleService {
 }
 
 export function startAgentCycleWorker(service:AgentCycleService,onError:(error:unknown)=>void=()=>{}) {
-  let busy=false,stopped=false;
-  const tick=async()=>{if(busy||stopped)return;busy=true;try{for(const cycle of await service.list()){if(stopped)break;try{await service.advance(cycle.projectId,cycle.id);}catch(error){onError(error);}}}catch(error){onError(error);}finally{busy=false;}};
+  let busy=false,stopped=false,afterId:string|undefined;
+  const tick=async()=>{if(busy||stopped)return;busy=true;try{const page=service.listWorkerPage?await service.listWorkerPage(afterId):{cycles:await service.list(),nextAfterId:undefined};for(const cycle of page.cycles){if(stopped)break;try{await service.advance(cycle.projectId,cycle.id);}catch(error){onError(error);}}if(!stopped)afterId=page.nextAfterId;}catch(error){onError(error);}finally{busy=false;}};
   const timer=setInterval(()=>void tick(),3000);timer.unref();
   return ()=>{stopped=true;clearInterval(timer);};
 }
