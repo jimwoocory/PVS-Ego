@@ -9,8 +9,8 @@ const bindingSchema=z.object({instanceId:z.string().min(1),spaceId:z.number().in
 export type GoOwnedResearchBinding=z.infer<typeof bindingSchema>;
 export type GoResearchScope={projectId:string;cycleId:string;actionId:string;contextHash:string};
 export type GoOwnedResearchRequest={op:'start';id:string;mode:'session-open'|'session-read';timeoutMs:number;scope:GoResearchScope;researchRunId:string;binding?:GoOwnedResearchBinding;captureScreenshot?:boolean};
-/** Transport is injected only after existing Agent confirmation. The default
- * factory never registers this executor and the application guard is unchanged. */
+/** Only the trusted local launcher injects the transport. Each request still
+ * requires the existing Agent confirmation; the application guard is unchanged. */
 export type GoOwnedResearchTransport=(request:GoOwnedResearchRequest)=>Promise<unknown[]>;
 const eventSchema=z.object({id:z.string(),type:z.string(),sequence:z.number().int().positive(),scope:z.unknown().optional(),code:z.string().optional(),data:z.any().optional()});
 const documentSchema=(sourceUrl:string)=>z.object({sourceUrl:z.literal(sourceUrl),finalUrl:z.literal(sourceUrl),title:z.string().min(1).max(256),text:z.string().min(1).max(4000),fetchedAt:z.iso.datetime(),truncated:z.boolean()}).strict();

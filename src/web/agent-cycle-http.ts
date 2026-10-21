@@ -31,7 +31,7 @@ function authenticated(req:IncomingMessage) {
 }
 
 /** Stateless Streamable HTTP: JSON responses, explicit 405 for optional SSE GET. */
-export async function handleAgentCycleHttp(req:IncomingMessage,res:ServerResponse,url:URL,deps:{agentCycles?:AgentCycleService;productFlow:ProductFlowService;operationsEvidence?:OperationsEvidenceReader}) {
+export async function handleAgentCycleHttp(req:IncomingMessage,res:ServerResponse,url:URL,deps:{agentCycles?:AgentCycleService;productFlow:ProductFlowService;operationsEvidence?:OperationsEvidenceReader;egoLite?:{sourceUrl:string}}) {
   const globalPage=url.pathname==="/agent-cycle";
   const page=url.pathname.match(/^\/projects\/([^/]+)\/agent-cycle$/);
   const api=url.pathname.match(/^\/api\/projects\/([^/]+)\/agent-cycles(?:\/([^/]+)(?:\/(confirm|reply|cancel|advance|invoke))?)?$/);
@@ -99,7 +99,7 @@ export async function handleAgentCycleHttp(req:IncomingMessage,res:ServerRespons
     const content=renderAgentCyclePage({project:project?{id:project.id,name:project.name}:undefined,
       projects:projectId?[]:await deps.productFlow.listProjects(),cycles:projectId?await service.list(projectId):[],skills:service.skills.list(),
       snapshot:projectId?await service.catalog.snapshot(projectId):undefined,
-      operationsReview:projectId&&deps.operationsEvidence?await deps.operationsEvidence.overview(projectId):undefined});
+      operationsReview:projectId&&deps.operationsEvidence?await deps.operationsEvidence.overview(projectId):undefined,egoLite:deps.egoLite});
     res.writeHead(200,{"content-type":"text/html; charset=utf-8"});res.end(content);return true;
   }
   if(!api){json(res,405,{message:"不支持此操作"});return true;}

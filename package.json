@@ -37,7 +37,9 @@
     "test:pr1-metrics-integration": "node scripts/run-pr1-metrics-integration.mjs",
     "test:pr1-worker-db": "node scripts/run-pr1-worker-db.mjs",
     "test:pr1-worker-scale": "node scripts/run-pr1-worker-scale.mjs",
-    "test:pr1-local-ui": "node scripts/run-pr1-local-ui.mjs"
+    "test:pr1-local-ui": "node scripts/run-pr1-local-ui.mjs",
+    "ego:configure": "node scripts/configure-ego-lite.mjs",
+    "test:ego-lite-workbench": "node scripts/run-ego-lite-workbench.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",

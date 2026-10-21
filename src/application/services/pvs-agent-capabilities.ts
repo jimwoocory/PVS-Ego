@@ -46,6 +46,7 @@ export type PvsAgentCapabilityDependencies = {
   productFlow: ProductFlowService; productRepo: ProductFlowRepository; productInput: ProductInputStore;
   research: ResearchService; researchRepo: ResearchRepository; aiGeneration: AiGenerationService;
   collectEgoLiteEvidence?: (context:AgentCapabilityContext,input:{goal:string;sourceUrls:Array<{url:string;sourceType:"USER_URL"}>})=>Promise<Awaited<ReturnType<ResearchService["startRun"]>>>;
+  ownedEgoLiteSourceUrl?: string;
   smartGeneration: SmartGenerationService; referenceVideo: ReferenceVideoAnalysisService;
   finalOutput: FinalOutputRepository; finalAssembly: FinalAssemblyService; finalQc: FinalQcService; review: ReviewService;
   publishBridge: PublishBridgeService; publishRepo: PublishRepository;
@@ -66,7 +67,7 @@ const empty = z.object({}).strict();
 const runInput = z.object({ runId: id }).strict();
 const runStepInput = z.object({ runId: id, expectedRevision: z.number().int().positive() }).strict();
 const source = z.enum(["OFFICIAL", "USER_URL", "PUBLIC_PRODUCT", "COMPETITOR", "INDUSTRY", "TREND", "PLATFORM"]);
-function assertOwnedEgoLiteSources(baseUrl: string, sources: Array<{ url: string; sourceType: string }>) {
+function assertOwnedEgoLiteSources(baseUrl: string, sources: Array<{ url: string; sourceType: string }>, ownedUrl?: string) {
   const base = new URL(baseUrl);
   if (base.protocol !== "http:" || base.hostname !== "127.0.0.1" || !base.port) throw new DomainValidationError("Ego Lite 本机来源尚未配置");
   for (const item of sources) {
@@ -75,6 +76,7 @@ function assertOwnedEgoLiteSources(baseUrl: string, sources: Array<{ url: string
         !/^\/bridge-fixture\/[A-Za-z0-9-]{1,80}$/.test(url.pathname))
       throw new DomainValidationError("当前仅允许明确绑定的本机合成来源");
   }
+  if(ownedUrl && (sources.length!==1 || sources[0]!.url!==ownedUrl))throw new DomainValidationError("本机合成来源已经变化，请重新准备并确认当前动作");
 }
 const receiptSchema = z.object({
   projectId: id, cycleId: id, actionId: id, kind: z.string(), createdAt: z.string(), payload: z.record(z.string(), z.unknown())
@@ -234,9 +236,9 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
       run: async c => answer("已保存研究", await this.d.research.pageData(c.projectId)) });
     this.add({ id: "research.collect-evidence", title: "只读采集本机合成来源", description: "经具体来源确认后仅保存本机合成页面证据；不搜索、不生成摘要、不调用模型。", stage: "RESEARCH", effect: "HUMAN_DECISION",
       inputSchema: z.object({ goal: z.string().trim().min(3).max(3000), sourceUrls: z.array(z.object({ url: z.string().url(), sourceType: source }).strict()).min(1).max(6) }).strict(),
-      preview: async (_projectId, input) => { assertOwnedEgoLiteSources(this.d.publicBaseUrl, input.sourceUrls); return JSON.stringify({ goal: input.goal, sourceUrls: input.sourceUrls, operation: "仅采集来源证据，不运行搜索或模型" }, null, 2); },
+      preview: async (_projectId, input) => { assertOwnedEgoLiteSources(this.d.publicBaseUrl, input.sourceUrls,this.d.ownedEgoLiteSourceUrl); return JSON.stringify({ goal: input.goal, sourceUrls: input.sourceUrls, operation: "仅采集来源证据，不运行搜索或模型" }, null, 2); },
       run: async (context, input) => {
-        assertOwnedEgoLiteSources(this.d.publicBaseUrl, input.sourceUrls);
+        assertOwnedEgoLiteSources(this.d.publicBaseUrl, input.sourceUrls,this.d.ownedEgoLiteSourceUrl);
         if(!this.d.collectEgoLiteEvidence)throw new DomainValidationError("Ego Lite 本机执行器尚未接入，未开始采集");
         const result = await this.d.collectEgoLiteEvidence(context,{goal:input.goal,sourceUrls:input.sourceUrls.map(item=>({url:item.url,sourceType:"USER_URL"}))});
         return answer("只读来源采集：" + result.run.status, result, [evidence("RESEARCH", "RESEARCH_RUN", result.run.id)], result.run.status === "BLOCKED" ? "WAITING_USER" : result.run.status === "FAILED" ? "BLOCKED" : "COMPLETE");
@@ -653,7 +655,7 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
       reply = { draft, parentComment: comment ? { id: comment.id, projectId: comment.projectId, awemeId: comment.awemeId,
         cid: comment.cid, parentCid: comment.parentCid, contentHash: comment.contentHash, text: comment.text } : null };
     }
-    return hashValue({ workspace, production: runs.map(run => ({ id: run.id, projectId: run.projectId, revision: run.revision })).sort((a, b) => a.id.localeCompare(b.id)), final,
+    return hashValue({ workspace, ...(capabilityId==="research.collect-evidence"?{egoLiteSourceUrl:this.d.ownedEgoLiteSourceUrl}:{}), production: runs.map(run => ({ id: run.id, projectId: run.projectId, revision: run.revision })).sort((a, b) => a.id.localeCompare(b.id)), final,
       publication: { preference, packages: packages.map(p => ({ id: p.id, status: p.status, providerType: p.providerType, title: p.titleDraft, description: p.descriptionDraft,
         finalAssemblyId: p.finalAssemblyId, finalArtifactId: p.finalArtifactId, finalArtifactHash: p.finalArtifactHash })), receipts }, binding, feedback, reply });
   }

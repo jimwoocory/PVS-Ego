@@ -1,8 +1,8 @@
 # PR #1 逐文件审查覆盖清单
 
-审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录代替文件**。C1/C2/C3各新增3项，C4再新增8项，C5新增CI workflow及首次进入PR差异的原边界套件共2项，C8新增本地测试说明1项，C9新增定向运行器与两个测试文件3项，本轮待提交公开范围为 **136 项**。新增项在末表单独列出，已修改的原文件仍计入原113项；提交后再核对GitHub集合。
+审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录代替文件**。C1/C2/C3各新增3项，C4再新增8项，C5新增CI workflow及首次进入PR差异的原边界套件共2项，C8新增本地测试说明1项，C9新增定向运行器与两个测试文件3项，C10新增7项，本轮待提交公开范围为 **143 项**。新增项在末表单独列出，已修改的原文件仍计入原113项；提交后再核对GitHub集合。
 
-这是指定深度的静态审查与证据索引，**不是136个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。worker运行证据以C4为准；后续C5边界、C6 Go桥、C7 Go研究、C8 Go会话均分轮单独运行，不能拼接成完整平台E2E。C5另有全新独立审查者静态复核，范围与限制见末表及分轮记录。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
+这是指定深度的静态审查与证据索引，**不是143个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。worker运行证据以C4为准；后续C5边界、C6 Go桥、C7 Go研究、C8 Go会话均分轮单独运行，不能拼接成完整平台E2E。C5另有全新独立审查者静态复核，范围与限制见末表及分轮记录。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
 
 ## C1 前轮补漏与限定运行证据
 
@@ -282,13 +282,27 @@ Tabbit创建标签时协议拒绝，未执行页面操作，空闲空任务已�
 | N22 | [tests/pr1-local-ui-fixture.mjs](../tests/pr1-local-ui-fixture.mjs) | 实际HTTP服务与合成注入 | 原默认工厂无注入先拒绝，固定读取器仅在测试子进程注入；无真实Ego | C9 |
 | N23 | [tests/pr1-local-ui-isolated.test.mjs](../tests/pr1-local-ui-isolated.test.mjs) | 新SQLite/Prisma/HTTP | F11复用与损坏拒绝、确认取消、本机来源限制、合成证据保存 | C9 10/10 |
 
+## C10 实际 Ego Lite 宿主接入默认启动
+
+同一默认工厂与独立监督进程经原Agent/ResearchService、实际Go/CLI/SDK、新宿主和新空白SQLite/Prisma完成限定采集，唯一`test:ego-lite-workbench`最终7/7、退出0，8个自有进程正常退出0。原server/Agent HTTP/Agent UI/能力目录、启动脚本及runtime表项按本次差异复核；具体确认、当前租约与来源绑定、IPC事件、取消/清理跨动作隔离、安装摘要拒绝、旧来源权限失效与保存证据回显已覆盖。原生点击因浏览器URL策略拒绝仍BLOCKED，非HTTP视觉不计PASS；不含普通网站/平台。详见[C10公开记录](PUBLIC-CHANGE-REVIEW-2026-10-21.md#pr-1-c10-实际-ego-lite-默认工作台接入)。
+
+| 编号 | 文件 | 复核深度 | 审查焦点与结果 | 关联运行证据 |
+| --- | --- | --- | --- | --- |
+| N24 | [scripts/ego-lite-installation.mjs](../scripts/ego-lite-installation.mjs) | 安装固定与路径 | 独立本地清单、物理文件、执行文件/宿主源码/桥源码摘要变化拒绝 | C10 |
+| N25 | [scripts/configure-ego-lite.mjs](../scripts/configure-ego-lite.mjs) | 离线配置与Go编译 | 显式本地路径、净化env、禁止下载、不读取旧profile、编译退出后原子写清单 | C10本机配置 |
+| N26 | [scripts/ego-lite-supervisor.mjs](../scripts/ego-lite-supervisor.mjs) | 可信父进程边界与生命周期 | 原DB租约/动作/run核验、固定来源、宿主网络限制、取消及清理绑定、终态退出回执 | C10实际宿主 |
+| N27 | [scripts/serve-ego-lite-child.mjs](../scripts/serve-ego-lite-child.mjs) | 受守卫的默认业务进程 | 固定IPC协议、原研究Provider/Prisma Artifact、AbortSignal、真实退出后上报、握手限时 | C10 |
+| N28 | [scripts/run-ego-lite-workbench.mjs](../scripts/run-ego-lite-workbench.mjs) | 单一专项与最终回执 | 新UUID会话、源码摘要、套件/全部自有子进程退出后才写最终PASS | C10 7/7 |
+| N29 | [tests/ego-lite-workbench-isolated.test.mjs](../tests/ego-lite-workbench-isolated.test.mjs) | 实际宿主/DB/HTTP定向断言 | 确认前零执行、动态DOM/PNG、取消、竞争动作、重启与证据回显；无原生点击声明 | C10 7/7 |
+| N30 | [scripts/start-isolated.mjs](../scripts/start-isolated.mjs) | 首次进入PR差异的默认启动器 | 预检不启动宿主；有效本机清单才启用监督进程；无清单保留原守卫入口 | C10实际3097启动 |
+
 ## 明确剩余未验收项
 
 | 编号 | 尚缺证据 | 当前边界与下一步 |
 | --- | --- | --- |
-| R1 | 默认工作台到实际Go/Ego Lite宿主的受限传输、实际配置入口及取消/超时/异常断连 | C9仅完成原Agent确认后经可注入读取器进入ResearchService的业务接线；测试读取器是合成函数，默认`serve`仍拒绝。H13只回收直接工作进程，后代/宿主动作可能仍存在；remoteActionsRolledBack=false |
+| R1 | 实际宿主异常断连/运行中监督进程退出/超时组合、普通网站与真实账号接线 | C10补齐离线配置、默认受限IPC、实际Go/CLI/SDK/新宿主、实际取消与8个自有进程退出；仅固定合成页面。未宣称任意进程树或远端动作回滚；每动作新宿主，旧profile/许可不恢复 |
 | R2 | 小时/天级浸泡、更大规模/真实负载/性能SLO与真实设备故障 | C4补15分钟、千条积压、MANAGED/Agent公平扫描及本地SQLite/文件错误；ALL索引独立运行、万级任务、设备EIO/ENOSPC/断电等仍缺。C3自然TTL/重启为历史，stop不强制取消当前一步 |
-| R3 | 共享指标之外的当前组合回归及截图视觉 | C9补产品资料实际保存/刷新和Agent取消、合成读取器HTTP/Prisma10/10；原生确认点击输入超时仍BLOCKED。C2指标切片23项及截图BLOCKED保持，其他业务组合未重跑 |
+| R3 | 共享指标之外的当前组合回归及工作台原生点击/截图视觉 | C10实际宿主/Prisma/HTTP7/7与真实合成页PNG通过，但浏览器URL策略拒绝工作台读取，原生确认仍BLOCKED；C9输入超时和C2指标切片23项/截图BLOCKED分别保留 |
 | R4 | U1 真人登录/验证码后归还原会话 | 固定自有页成功不证明真人归还；账号与实际验证由用户处理，旧句柄/权限不自动恢复 |
 | R5 | U2 实际模型推理、媒体外发、音频与费用 | 模型保持 aihubmix/deepseek-v4.1-flash；音频 NOT_OBSERVED、费用 UNKNOWN，不自动发素材/调用模型/计费或切模型 |
 | R6 | U3 真实编辑态、真实上传/提交与可信作品回执 | 真实编辑态仍 BLOCKED；本机文件状态替身不能证明上传，原成片占位不自动释放，预检/归还不等于发布授权 |

@@ -206,6 +206,7 @@ import type {
 } from "../domain/schemas.js";
 
 export type WebDependencies = {
+  egoLite?: {sourceUrl:string};
   agentCycles?: AgentCycleService;
   douyinCollection?: DouyinCollectionService;
   douyinSchedules?: DouyinOperationsScheduleService;
@@ -256,7 +257,7 @@ export type WebDependencies = {
   provider: DomesticJimengCliProvider;
 };
 
-export function createDefaultDependencies(options: {egoLiteReadSource?: (input:{source:WebResearchSource;projectId:string;runId:string;action:AgentCapabilityContext})=>Promise<WebResearchDocument>} = {}): WebDependencies {
+export function createDefaultDependencies(options: {egoLiteSourceUrl?:string;egoLiteReadSource?: (input:{source:WebResearchSource;projectId:string;runId:string;action:AgentCapabilityContext})=>Promise<WebResearchDocument>} = {}): WebDependencies {
   const artifacts = new PrismaArtifactRepository(prisma);
   const generation = new PrismaGenerationRepository(prisma);
   const workflow = new PrismaWorkflowRepository(prisma);
@@ -685,6 +686,7 @@ export function createDefaultDependencies(options: {egoLiteReadSource?: (input:{
     publishBridge
   });
   const agentCapabilities = new PvsAgentCapabilities({
+    ownedEgoLiteSourceUrl:options.egoLiteSourceUrl,
     productFlow,productRepo:productFlowRepo,productInput,research,researchRepo,aiGeneration,smartGeneration,referenceVideo,collections:douyinCollection,
     ...(options.egoLiteReadSource?{collectEgoLiteEvidence:(context:AgentCapabilityContext,input:{goal:string;sourceUrls:Array<{url:string;sourceType:"USER_URL"}>})=>egoLiteAction.run(context,()=>research.startRun({projectId:context.projectId,mode:"BASIC",collectOnly:true,goal:input.goal,sourceUrls:input.sourceUrls,queries:[],marketVideo:{enabled:false}}))}:{}),
     schedules:douyinSchedules,readOpsAccount:()=>douyinOpsRuntime.identity(),
@@ -699,8 +701,9 @@ export function createDefaultDependencies(options: {egoLiteReadSource?: (input:{
       return {accountId:selected.platformUserId,displayName:selected.accountDisplayName??selected.platformUserId};
     }
   });
-  const agentCycles = new AgentCycleService(new PrismaAgentCycleRepository(prisma),agentCapabilities,aiRuntime);
+  const agentCycles = new AgentCycleService(new PrismaAgentCycleRepository(prisma),agentCapabilities,aiRuntime,undefined,new Set(options.egoLiteSourceUrl&&options.egoLiteReadSource?["research.collect-evidence"]:[]));
   const dependencies: WebDependencies = {
+    ...(options.egoLiteSourceUrl?{egoLite:{sourceUrl:options.egoLiteSourceUrl}}:{}),
     agentCycles,
     douyinCollection,
     douyinSchedules,
@@ -1059,6 +1062,12 @@ export function createAppServer(
     installChineseResponse(res);
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
+      if(deps.egoLite && req.method==="GET" && req.url===new URL(deps.egoLite.sourceUrl).pathname){
+        const nonce=new URL(deps.egoLite.sourceUrl).pathname.split('/').at(-1)!;
+        if(!/^[a-f0-9-]{36}$/.test(nonce))throw new DomainValidationError("本机合成来源无效");
+        res.writeHead(200,{"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":"default-src 'none'; script-src 'unsafe-inline'; connect-src 'none'"});
+        res.end(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="pvs-go-fixture" content="${nonce}"><title>Ego Lite 本机合成页面</title><body data-tick="0"><h1>Ego Lite 本机只读验证</h1><article data-pvs-research-document></article><script>let tick=0;setInterval(()=>document.body.dataset.tick=String(++tick),50);setTimeout(()=>{document.querySelector('article').innerText=('这是独立工作台生成的合成页面，仅用于验证实际浏览器读取和截图。内容不是商品事实，不授予权限，不包含真实账号或素材。保存证据后仍由用户审阅，不触发模型、上传或发布。').repeat(3);document.body.dataset.researchReady='1';},100);</script></body></html>`);return;
+      }
       if (await handleResearchEvidenceHttp(req,res,url,deps)) return;
       if (await handleOperationsEvidenceHttp(req,res,url,deps)) return;
       if (await handleAgentCycleHttp(req,res,url,deps)) return;
