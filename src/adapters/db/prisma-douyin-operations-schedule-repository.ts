@@ -3,6 +3,7 @@ import type { DouyinOperationsScheduleRepository } from "../../application/ports
 import { operationsScheduleSchema, type DouyinOperationsSchedule } from "../../domain/douyin-operations-schedule.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import {hashValue} from "../../domain/hashing.js";
+import {douyinCollectionRunSchema,type DouyinCollectionRun} from "../../domain/douyin-collection.js";
 
 type Row = {id:string;projectId:string;requestKey:string;inputHash:string;status:string;revision:number;nextAt:Date;dataJson:string;leaseOwner:string|null;leaseExpiresAt:Date|null};
 const parse = (row: Row) => {
@@ -95,7 +96,7 @@ export class PrismaDouyinOperationsScheduleRepository implements DouyinOperation
     return {revision:run.revision,state:!row.leaseOwner?"FREE" as const:expiresAt&&Date.parse(expiresAt)>Date.parse(now)?"ACTIVE" as const:"EXPIRED" as const,...(expiresAt?{expiresAt}:{}),checkedAt:now};
   }
 
-  async resume(projectId:string,id:string,revision:number,inputHash:string,now:string){
+  async resume(projectId:string,id:string,revision:number,inputHash:string,now:string,collections:readonly DouyinCollectionRun[]){
     return this.db.$transaction(async tx=>{
       const rows=await tx.$queryRaw<Row[]>`SELECT * FROM "DouyinOperationsScheduleRecord" WHERE "id"=${id} AND "projectId"=${projectId}`;
       if(!rows[0])return null;
@@ -104,7 +105,22 @@ export class PrismaDouyinOperationsScheduleRepository implements DouyinOperation
       const run=operationsScheduleSchema.parse({...old,status:"SCHEDULED",revision:old.revision+1,nextAt:new Date(Math.max(Date.parse(now),Date.parse(old.nextAt))).toISOString(),updatedAt:now,errorCode:undefined,errorMessage:undefined});
       const changed=await tx.$executeRaw`UPDATE "DouyinOperationsScheduleRecord" SET "status"='SCHEDULED',"revision"=${run.revision},"nextAt"=${new Date(run.nextAt)},"updatedAt"=${new Date(now)},"dataJson"=${JSON.stringify(run)},"leaseOwner"=NULL,"leaseExpiresAt"=NULL
         WHERE "id"=${id} AND "projectId"=${projectId} AND "revision"=${revision} AND ("leaseOwner" IS NULL OR "leaseExpiresAt"<=${new Date(now)})`;
-      return changed===1?run:null;
+      if(changed!==1)return null;
+      const ids=[old.checkpoint?.commentsRunId,...Object.values(old.checkpoint?.replyRuns??{})].filter((id):id is string=>Boolean(id));
+      if(new Set(ids).size!==ids.length||collections.length!==ids.length||new Set(collections.map(c=>c.id)).size!==ids.length||collections.some(c=>!ids.includes(c.id)))throw new DomainValidationError("原采集确认清单与计划不一致");
+      for(const expected of collections){
+        const saved=await tx.douyinCollectionRunRecord.findUnique({where:{id:expected.id}});
+        const current=saved?douyinCollectionRunSchema.parse(JSON.parse(saved.runJson)):null;
+        if(!saved||!current||saved.projectId!==projectId||saved.revision!==expected.revision||saved.status!==expected.status||saved.inputHash!==expected.inputHash||hashValue(current)!==hashValue(expected))throw new DomainValidationError("原采集版本或内容已变化，全部续接已回滚");
+        // Even non-blocked children must still be idle and exactly as reviewed.
+        if(saved.leaseOwner&&(!saved.leaseExpiresAt||saved.leaseExpiresAt.getTime()>Date.parse(now)))throw new DomainValidationError("原采集租约仍有效，全部续接已回滚");
+        if(current.status!=="BLOCKED"||!["AUTH_REQUIRED","RISK_CONTROL"].includes(current.errorCode??""))continue;
+        const next=douyinCollectionRunSchema.parse({...current,status:current.pages?"PARTIAL":"QUEUED",retryable:true,errorCode:undefined,errorMessage:undefined,revision:current.revision+1,leaseExpiresAt:undefined,updatedAt:now});
+        const count=await tx.$executeRaw`UPDATE "DouyinCollectionRunRecord" SET "runJson"=${JSON.stringify(next)},"status"=${next.status},"revision"=${next.revision},"updatedAt"=${new Date(now)},"leaseOwner"=NULL,"leaseExpiresAt"=NULL
+          WHERE "id"=${current.id} AND "projectId"=${projectId} AND "revision"=${current.revision} AND ("leaseOwner" IS NULL OR "leaseExpiresAt"<=${new Date(now)})`;
+        if(count!==1)throw new DomainValidationError("原采集执行权已变化，全部续接已回滚");
+      }
+      return run;
     });
   }
 }

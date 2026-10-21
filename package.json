@@ -28,7 +28,8 @@
     "test:u3-preflight-durable": "node scripts/run-u3-preflight-durability.mjs",
     "test:u2-evidence-integrity": "node scripts/run-u2-evidence-integrity.mjs",
     "test:u4-schedule-durable": "node scripts/run-u4-schedule-durability.mjs",
-    "test:u45-workbench-review": "node scripts/run-u45-workbench-review.mjs"
+    "test:u45-workbench-review": "node scripts/run-u45-workbench-review.mjs",
+    "test:pr1-resume-atomic": "node scripts/run-pr1-resume-atomic.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",

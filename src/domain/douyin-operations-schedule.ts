@@ -36,7 +36,7 @@ export const operationsScheduleSchema = z.object({
   const fail=(message:string)=>ctx.addIssue({code:"custom",message});
   if(run.completedCaptures>run.input.maxCaptures||run.history.length!==run.completedCaptures||run.history.some((item,i)=>item.index!==i+1))fail("运营计划观察次数或历史不一致");
   const capture=run.checkpoint;
-  if(capture&&(capture.index>run.completedCaptures+1||new Set(capture.parents??[]).size!==(capture.parents??[]).length||Object.keys(capture.replyRuns).some(cid=>!capture.parents?.includes(cid))))fail("运营计划检查点或父评论范围不一致");
+  if(capture&&(capture.index>run.completedCaptures+1||(capture.parents?.length??0)>run.input.maxReplyParents||new Set(capture.parents??[]).size!==(capture.parents??[]).length||Object.keys(capture.replyRuns).some(cid=>!capture.parents?.includes(cid))))fail("运营计划检查点或父评论范围不一致");
 });
 export type DouyinOperationsScheduleInput = z.input<typeof operationsScheduleInputSchema>;
 export type DouyinOperationsSchedule = z.infer<typeof operationsScheduleSchema>;

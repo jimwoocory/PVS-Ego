@@ -62,20 +62,25 @@ export class DouyinOperationsScheduleService {
     const run=await this.repo.get(input.projectId,input.id);
     if(!input.confirmed||!run||run.revision!==input.expectedRevision||run.inputHash!==input.inputHash||run.input.opsAccountUid!==input.expectedAccountId)throw new DomainValidationError("续接需要明确确认原计划的最新版本、输入哈希和运营账号");
     if(!run.executionProtocol&&run.checkpoint)throw new DomainValidationError("历史检查点缺少读取意图协议，不能通过暂停再续接自动重读");
+    if(run.input.cadence&&(!run.cadenceState||run.cadenceState.version!==run.input.cadence.version||run.cadenceState.deadlineAt!==new Date(Date.parse(run.input.startAt)+run.input.cadence.maxDurationSeconds*1000).toISOString()))throw new DomainValidationError("原观察时间上限缺失或变化，不能续接");
     if(!["PAUSED","BLOCKED"].includes(run.status)||run.consecutiveFailures>=3||run.completedCaptures>=run.input.maxCaptures||run.terminalReason||run.input.cadence&&this.clock().getTime()>=Date.parse(run.cadenceState!.deadlineAt))throw new DomainValidationError("原计划已结束、达到上限或不可续接，不扩大观察预算");
     if(![undefined,"AUTH_REQUIRED","RISK_CONTROL","READ_OUTCOME_UNKNOWN"].includes(run.errorCode))throw new DomainValidationError("原计划存在范围或数据错误，需先核对，不自动解除阻断");
     await this.scope(run.input);
     // Unknown outcomes remain intents. tick may reconcile saved results, never replay them blindly.
-    for(const runId of [run.checkpoint?.commentsRunId,...Object.values(run.checkpoint?.replyRuns??{})].filter((id):id is string=>Boolean(id))){
-      const collection=await this.d.collections.get(input.projectId,runId);
-      if(collection?.status==="BLOCKED"&&["AUTH_REQUIRED","RISK_CONTROL"].includes(collection.errorCode??"")){
-        if(!this.d.collections.resumeAfterHuman)throw new DomainValidationError("原采集缺少人工续接能力");
-        await this.d.collections.resumeAfterHuman({projectId:input.projectId,runId,expectedRevision:collection.revision,opsAccountUid:run.input.opsAccountUid});
-      }
+    const collections:DouyinCollectionRun[]=[];
+    const handles=[...(run.checkpoint?.commentsRunId?[{id:run.checkpoint.commentsRunId,kind:"COMMENTS" as const,parentCid:undefined}]:[]),...Object.entries(run.checkpoint?.replyRuns??{}).map(([parentCid,id])=>({id,kind:"REPLIES" as const,parentCid}))];
+    for(const handle of handles){
+      const collection=await this.d.collections.get(input.projectId,handle.id);
+      if(!collection)throw new DomainValidationError("原采集检查点缺失，不能解除其他任务的阻断");
+      this.assertCollectionScope(run,collection,handle.kind,handle.parentCid);
+      collections.push(collection);
     }
-    const resumed=await this.repo.resume?.(input.projectId,run.id,run.revision,run.inputHash,this.now());
+    const resumed=await this.repo.resume?.(input.projectId,run.id,run.revision,run.inputHash,this.now(),collections);
     if(!resumed)throw new DomainValidationError("原计划版本、租约或续接能力已变化");
     return resumed;
+  }
+  private assertCollectionScope(run:DouyinOperationsSchedule,item:DouyinCollectionRun,kind:"COMMENTS"|"REPLIES",parentCid?:string){
+    if(item.projectId!==run.input.projectId||item.bindingId!==run.input.bindingId||item.awemeId!==run.input.awemeId||item.opsAccountUid!==run.input.opsAccountUid||item.kind!==kind||item.parentCid!==parentCid||item.pageSize!==run.input.pageSize||item.batchPages!==1)throw new DomainValidationError("原采集检查点与计划的作品、账号、父评论或边界不一致");
   }
   private checkCollection(run: DouyinCollectionRun) {
     if (run.status !== "BLOCKED") return;
@@ -108,7 +113,7 @@ export class DouyinOperationsScheduleService {
     const save = async () => { run.updatedAt = this.now(); run = await this.repo.save(run, owner, this.until()); };
     const later = () => { run.status = "SCHEDULED"; run.nextAt = new Date(this.clock().getTime() + run.input.intervalSeconds * 1000).toISOString(); };
     const checkHandle=(item:DouyinCollectionRun,kind:"COMMENTS"|"REPLIES",parentCid?:string)=>{
-      if(item.projectId!==projectId||item.bindingId!==run.input.bindingId||item.awemeId!==run.input.awemeId||item.opsAccountUid!==run.input.opsAccountUid||item.kind!==kind||item.parentCid!==parentCid||item.pageSize!==run.input.pageSize||item.batchPages!==1)throw new DomainValidationError("原采集检查点与计划的作品、账号、父评论或边界不一致");
+      this.assertCollectionScope(run,item,kind,parentCid);
     };
     const recoverPending=async()=>{
       const pending=run.checkpoint?.pendingRead;if(!pending)return;

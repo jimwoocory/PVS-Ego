@@ -52,7 +52,7 @@ export class OperationsEvidenceReader {
         if(!saved||saved.id!==snapshotId||saved.projectId!==projectId||saved.bindingId!==binding.id||saved.awemeId!==run.input.awemeId||sha256Text(saved.rawJson)!==saved.contentHash)return unavailable("SCHEDULE_METRICS_CHANGED");
         metrics.push({id:saved.id,captureKey:saved.captureKey,capturedAt:saved.capturedAt,contentHash:saved.contentHash,plays:saved.plays,likes:saved.likes,comments:saved.comments,shares:saved.shares,metricAvailability:saved.metricAvailability});
       }
-      const windowOpen=!run.input.cadence||Boolean(run.cadenceState&&Date.parse(run.cadenceState.deadlineAt)>Date.parse(checkedAt));
+      const windowOpen=!run.input.cadence||Boolean(run.cadenceState&&run.cadenceState.version===run.input.cadence.version&&run.cadenceState.deadlineAt===new Date(Date.parse(run.input.startAt)+run.input.cadence.maxDurationSeconds*1000).toISOString()&&Date.parse(run.cadenceState.deadlineAt)>Date.parse(checkedAt));
       const resumeAllowed=["PAUSED","BLOCKED"].includes(run.status)&&lease.state!=="ACTIVE"&&run.completedCaptures<run.input.maxCaptures&&run.consecutiveFailures<3&&!run.terminalReason&&windowOpen&&!run.checkpoint?.pendingRead&&Boolean(run.executionProtocol||!run.checkpoint)&&[undefined,"AUTH_REQUIRED","RISK_CONTROL"].includes(run.errorCode);
       return {status:"VERIFIED" as const,run,lease,collections:savedCollections,metrics,resumeAllowed,checkedAt};
     }catch{return unavailable("SCHEDULE_INTEGRITY_FAILED");}
