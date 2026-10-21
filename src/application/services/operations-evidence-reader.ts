@@ -10,6 +10,7 @@ import {creativeBatchSchema,productTruthSchema} from "../../domain/schemas.js";
 import {feedbackInputReceiptSchema} from "../../domain/douyin-feedback-evidence.js";
 import {assertEvidenceScope} from "../../domain/douyin-feedback-validation.js";
 import {hashValue,sha256Bytes,sha256Text} from "../../domain/hashing.js";
+import {assertSavedMetricSnapshot} from "./douyin-read-evidence-audit.js";
 
 const unavailable=(code:string)=>({status:"UNVERIFIABLE" as const,code});
 const recordSchema=z.object({projectId:z.string(),cycleId:z.string().min(1),actionId:z.string().min(1),kind:z.literal("STRATEGY_INPUT"),createdAt:z.string().datetime(),payload:z.object({batchId:z.string().min(1),version:z.number().int().positive(),batchHash:z.string().regex(/^[a-f0-9]{64}$/),truthHash:z.string().regex(/^[a-f0-9]{64}$/),context:z.unknown(),inputHash:z.string(),feedback:z.array(z.unknown()),feedbackInputReceipt:feedbackInputReceiptSchema.optional(),activate:z.boolean()}).passthrough()});
@@ -49,7 +50,8 @@ export class OperationsEvidenceReader {
       if(run.checkpoint?.metricsSnapshotId)expected.set(run.completedCaptures+1,run.checkpoint.metricsSnapshotId);
       for(const [index,snapshotId] of expected){
         const saved=await this.ops.findMetricSnapshotByCaptureKey(projectId,`schedule:${run.id}:${index}:metrics`);
-        if(!saved||saved.id!==snapshotId||saved.projectId!==projectId||saved.bindingId!==binding.id||saved.awemeId!==run.input.awemeId||sha256Text(saved.rawJson)!==saved.contentHash)return unavailable("SCHEDULE_METRICS_CHANGED");
+        if(!saved||saved.id!==snapshotId||saved.captureKey!==`schedule:${run.id}:${index}:metrics`)return unavailable("SCHEDULE_METRICS_CHANGED");
+        try{assertSavedMetricSnapshot(saved,{projectId,bindingId:binding.id,awemeId:run.input.awemeId,opsAccountUid:run.input.opsAccountUid});}catch{return unavailable("SCHEDULE_METRICS_CHANGED");}
         metrics.push({id:saved.id,captureKey:saved.captureKey,capturedAt:saved.capturedAt,contentHash:saved.contentHash,plays:saved.plays,likes:saved.likes,comments:saved.comments,shares:saved.shares,metricAvailability:saved.metricAvailability});
       }
       const windowOpen=!run.input.cadence||Boolean(run.cadenceState&&run.cadenceState.version===run.input.cadence.version&&run.cadenceState.deadlineAt===new Date(Date.parse(run.input.startAt)+run.input.cadence.maxDurationSeconds*1000).toISOString()&&Date.parse(run.cadenceState.deadlineAt)>Date.parse(checkedAt));

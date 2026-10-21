@@ -18,6 +18,7 @@ import {
 } from "../../domain/douyin-ops.js";
 import { canonicalize,hashValue,sha256Text } from "../../domain/hashing.js";
 import { DomainValidationError } from "../../domain/validation.js";
+import {assertSavedMetricSnapshot} from "./douyin-read-evidence-audit.js";
 
 const outputSchema = z.object({
   summary: z.string().trim().min(1).max(1200),
@@ -108,10 +109,7 @@ export class DouyinRetrospectiveService {
     }
 
     // A frozen outer hash must not turn a changed saved row into trusted evidence.
-    for(const snapshot of snapshots){
-      let raw:any;try{raw=JSON.parse(snapshot.rawJson);}catch{throw new DomainValidationError("保存的指标原文不可解析，不重新采集");}
-      if(sha256Text(snapshot.rawJson)!==snapshot.contentHash||raw.awemeId!==snapshot.awemeId||metricKeys.some(key=>raw.metrics?.[key]!==snapshot[key]))throw new DomainValidationError("保存的指标正文、数值或哈希已变化，停止复盘");
-    }
+    for(const snapshot of snapshots)assertSavedMetricSnapshot(snapshot,{projectId:input.projectId,bindingId:binding.id,awemeId:binding.awemeId,opsAccountUid:binding.opsAccountUid});
     for(const comment of comments){
       let raw:any;try{raw=JSON.parse(comment.rawJson);}catch{throw new DomainValidationError("保存的评论原文不可解析，不重新采集");}
       if(sha256Text(comment.rawJson)!==comment.contentHash||raw.cid!==comment.cid||raw.awemeId!==comment.awemeId||raw.text!==comment.text||(raw.parentCid||undefined)!==comment.parentCid||hashValue(raw.observation??null)!==hashValue(comment.observation??null))throw new DomainValidationError("保存的评论正文、关系或观察哈希已变化，停止复盘");

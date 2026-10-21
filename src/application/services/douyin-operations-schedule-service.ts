@@ -6,7 +6,8 @@ import type { DouyinMetricService } from "./douyin-metric-service.js";
 import type { DouyinCollectionService } from "./douyin-collection-service.js";
 import { operationsScheduleInputSchema, operationsScheduleSchema, type DouyinOperationsScheduleInput, type DouyinOperationsSchedule } from "../../domain/douyin-operations-schedule.js";
 import { DomainValidationError } from "../../domain/validation.js";
-import { hashValue,sha256Text } from "../../domain/hashing.js";
+import { hashValue } from "../../domain/hashing.js";
+import {assertSavedMetricSnapshot} from "./douyin-read-evidence-audit.js";
 import type { DouyinCollectionRun } from "../../domain/douyin-collection.js";
 import {DouyinOpsRuntimeError} from "../ports/douyin-ops-runtime.js";
 
@@ -122,7 +123,8 @@ export class DouyinOperationsScheduleService {
         if(pending.requestKey!==key)throw new DomainValidationError("原指标意图与计划不一致");
         const snapshot=await this.d.ops.findMetricSnapshotByCaptureKey?.(projectId,key);
         if(!snapshot)throw new ScheduleReadUnknown("原指标读取结果不明，保留意图，不自动重读");
-        if(snapshot.bindingId!==run.input.bindingId||snapshot.awemeId!==run.input.awemeId||sha256Text(snapshot.rawJson)!==snapshot.contentHash)throw new DomainValidationError("原指标结果与计划绑定或哈希不一致");
+        if(snapshot.captureKey!==key)throw new DomainValidationError("原指标结果与计划采集标识不一致");
+        assertSavedMetricSnapshot(snapshot,{projectId,bindingId:run.input.bindingId,awemeId:run.input.awemeId,opsAccountUid:run.input.opsAccountUid});
         run.checkpoint!.metricsSnapshotId=snapshot.id;run.checkpoint!.metricsCapturedAt=snapshot.capturedAt;run.checkpoint!.metricObservation=metricObservation(snapshot);run.checkpoint!.metricsPartial=Object.values(snapshot.metricAvailability??{}).some(v=>v!=="OBSERVED");
       }else{
         const expected="schedule:"+run.id+":"+run.checkpoint!.index+(pending.kind==="COMMENTS"?":comments":":replies:"+pending.parentCid);
@@ -182,6 +184,8 @@ export class DouyinOperationsScheduleService {
         const snapshot = await this.d.metrics.refresh({ projectId, bindingId:binding.id,awemeId:run.input.awemeId,packageId: binding.packageId,
           captureKey: "schedule:" + run.id + ":" + (run.completedCaptures + 1) + ":metrics",beforeRead:fence,beforePersist:fence,writeFence:writeFence() });
         await assertLease();
+        if(snapshot.captureKey!=="schedule:"+run.id+":"+(run.completedCaptures+1)+":metrics")throw new DomainValidationError("指标结果与原计划采集标识不一致");
+        assertSavedMetricSnapshot(snapshot,{projectId,bindingId:binding.id,awemeId:run.input.awemeId,opsAccountUid:run.input.opsAccountUid});
         run.checkpoint!.metricsSnapshotId=snapshot.id;run.checkpoint!.metricsCapturedAt=this.now();
         run.checkpoint!.metricObservation=metricObservation(snapshot);
         run.checkpoint!.metricsPartial=Boolean(snapshot.metricAvailability&&Object.values(snapshot.metricAvailability).some(value=>value!=="OBSERVED"));

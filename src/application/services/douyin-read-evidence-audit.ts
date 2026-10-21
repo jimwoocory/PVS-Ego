@@ -1,7 +1,23 @@
-import {hashValue} from "../../domain/hashing.js";
+import {hashValue,sha256Text} from "../../domain/hashing.js";
+import {douyinMetricSnapshotSchema,type DouyinMetricSnapshot} from "../../domain/douyin-ops.js";
+import {metricKeys} from "../../domain/douyin-observation.js";
 import type {DouyinOpsCommentPage,DouyinOpsWork} from "../ports/douyin-ops-runtime.js";
 import {commentObservationSchema,legacyCommentObservation,type CommentObservation} from "../../domain/douyin-comment-observation.js";
 import {DomainValidationError} from "../../domain/validation.js";
+
+/** Check saved normalized values against the original bytes before display or reuse. */
+export function assertSavedMetricSnapshot(snapshot:DouyinMetricSnapshot,scope:{projectId:string;bindingId:string;awemeId:string;opsAccountUid?:string}){
+ try{
+  douyinMetricSnapshotSchema.parse(snapshot);
+  const raw=JSON.parse(snapshot.rawJson);
+  if(!raw||typeof raw!=="object"||Array.isArray(raw)||snapshot.projectId!==scope.projectId||snapshot.bindingId!==scope.bindingId||snapshot.awemeId!==scope.awemeId||raw.awemeId!==scope.awemeId||sha256Text(snapshot.rawJson)!==snapshot.contentHash||raw.durationMs!==snapshot.durationMs||
+   scope.opsAccountUid&&(raw.opsAccountUid!==scope.opsAccountUid||raw.authorUid!==scope.opsAccountUid))throw Error("SCOPE_CHANGED");
+  for(const key of metricKeys){
+   const value=raw.metrics?.[key],state=raw.metricAvailability?.[key]??(value===undefined?"NOT_PROVIDED":value===0?"LEGACY_UNVERIFIED":"OBSERVED");
+   if(value!==snapshot[key]||snapshot.metricAvailability?.[key]!==state)throw Error("METRIC_CHANGED");
+  }
+ }catch{throw new DomainValidationError("保存的指标原文、数值、可见性或账号范围不一致，停止展示或复用，不重新采集");}
+}
 
 type Observation={value?:number;status:"OBSERVED"|"UNKNOWN"};
 const counter=(v:unknown):Observation=>typeof v==="number"&&Number.isSafeInteger(v)&&v>=0?{value:v,status:"OBSERVED"}:{status:"UNKNOWN"};

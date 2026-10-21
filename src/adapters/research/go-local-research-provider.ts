@@ -36,8 +36,12 @@ export class GoLocalResearchProvider implements WebResearchProvider {
   }
 
   private async contained(s:Scope){
-    const realRoot=await fs.realpath(this.projectsRoot),realProject=await fs.realpath(s.projectRoot),realDir=await fs.realpath(path.dirname(s.file));
-    if(!realProject.startsWith(realRoot+path.sep)||!realDir.startsWith(realProject+path.sep))throw Error('GO_RESEARCH_PATH_DENIED');
+    const root=path.resolve(this.projectsRoot);
+    if(await fs.realpath(root)!==root||path.dirname(s.projectRoot)!==root)throw Error('GO_RESEARCH_PATH_DENIED');
+    for(let dir=path.dirname(s.file);dir!==root;dir=path.dirname(dir)){
+      const stat=await fs.lstat(dir);
+      if(!stat.isDirectory()||stat.isSymbolicLink()||await fs.realpath(dir)!==dir)throw Error('GO_RESEARCH_PATH_DENIED');
+    }
   }
 
   private async prepareDirectory(s:Scope){
@@ -59,7 +63,11 @@ export class GoLocalResearchProvider implements WebResearchProvider {
     await this.contained(s);
     const real=await fs.realpath(file),dir=await fs.realpath(path.dirname(s.file)),stat=await fs.lstat(file);
     if(path.dirname(real)!==dir||!stat.isFile()||stat.nlink!==1||stat.size>65536)throw Error('GO_RESEARCH_PATH_DENIED');
-    const bytes=await fs.readFile(file);if(bytes.length>65536)throw Error('GO_RESEARCH_FILE_TOO_LARGE');return bytes;
+    const bytes=await fs.readFile(file);if(bytes.length>65536)throw Error('GO_RESEARCH_FILE_TOO_LARGE');
+    await this.contained(s);
+    const after=await fs.lstat(file);
+    if(!after.isFile()||after.nlink!==1||stat.ino!==after.ino||stat.size!==after.size||stat.mtimeMs!==after.mtimeMs||bytes.length!==stat.size||await fs.realpath(file)!==file)throw Error('GO_RESEARCH_ARTIFACT_CHANGED');
+    return bytes;
   }
 
   private validateDocument(bytes:Buffer,s:Scope):WebResearchDocument{

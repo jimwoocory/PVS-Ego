@@ -32,7 +32,8 @@
     "test:pr1-resume-atomic": "node scripts/run-pr1-resume-atomic.mjs",
     "test:pr1-research-cache": "node scripts/run-pr1-research-cache.mjs",
     "test:pr1-go-receipt": "node scripts/run-pr1-go-receipt.mjs",
-    "test:pr1-worker-lifecycle": "node scripts/run-pr1-worker-lifecycle.mjs"
+    "test:pr1-worker-lifecycle": "node scripts/run-pr1-worker-lifecycle.mjs",
+    "test:pr1-final-review": "node scripts/run-pr1-final-review.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",
