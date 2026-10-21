@@ -171,3 +171,15 @@ ALL索引分支独立运行、小时/天级浸泡、万级以上规模、生产�
 最终新库有2个研究run、1条Evidence、2条Artifact（1条READY及1条断连后保留PENDING占位，后者不当成完成证据），provider配置、模型execution、generationAttempt均0；模型调用0、搜索调用0，brief为NOT_GENERATED_NOT_AUTHORIZED，真人采用false。Go构建、套件及宿主/Go桥/两次业务进程均观察退出0，4个应用子进程closed=true；最终回执在套件退出后生成，8个源码摘要匹配当前文件，原守卫SHA不变。
 
 本轮没有新确认的产品缺陷或产品源码更改，公开范围仍132项，只更新4份验收说明。修复后 `test:go-u1-session` 完整隔离回归仍未运行，下一轮优先；C6及其他旧专项不重跑。此轮自动驱动Ego读取合成页，没有进行原工作台HTTP/浏览器原生点击、截图或真人登录归还；不能替代生产能力接线、真实网站研究、真实模型/产品事实采用或平台E2E。既定GitHub CI按提交独立运行边界检查，不计入Go6/6。非Windows/完整组合、进程树回收、小时天级/物理I/O、U1真人、U2模型音频费用、U3真实编辑态BLOCKED、U4新片真实采集、U5真实采用、历史截图BLOCKED及正式GitHubApprove仍保留。模型保持aihubmix/deepseek-v4.1-flash、音频NOT_OBSERVED、费用UNKNOWN；无素材外发、付费生成、真实上传/发布/回复、原服务停止重启、合并或部署。
+
+## PR #1 U1 完整隔离回归与本地测试交接 C8
+
+从`310076f`开始，补齐三个修复入口中的最后一个`test:go-u1-session`。初轮构建退出0、10/10；随后本地入口检查发现F10，修复并构建退出0，仅复跑同一套件，最终 **10 PASS/0 FAIL、退出0、11005.8694ms**（9子项加父项），不累计初轮或历史通过数。
+
+真实Go/CLI/SDK与新Ego实例/profile、新会话和缓存、迁移新建SQLite/实际Prisma，核验原Agent门禁、动态正文/PNG、隐藏Space阻断、模拟选择后原BASIC run续接、接管拒绝缓存及归还复用、错scope/handle/URL拒绝、业务重启后不重新open/capture、部分来源续缺项、宿主重启后旧绑定/许可失效且不抢占。5个应用子进程（两次宿主、Go桥、两次业务进程）、Go构建及套件均退出0。最终11个源码摘要匹配、守卫不变，固定页4次GET，新库3个run/4条Evidence/4条READY Artifact；2份真实PNG均1264×678、47777字节并核对签名/摘要。模型provider/execution/generationAttempt和模型/搜索/外部调用均0。原Shell控制动作是测试包装器模拟，真人登录/验证码/归还和原生用户点击仍NOT_RUN，生产工厂未注册固定页面Go候选。
+
+**F10/P2：健康接口误标历史版本。** 本地`/health`原把旧构建/工作流标记与`9a94093`硬编码返回为当前信息。改为`baseline`历史对象，顶层`sourceRevision=null`及`sourceRevisionStatus=NOT_EMBEDDED_USE_CHECKOUT_GIT`，实际版本由checkout Git核对。修复后真实HTTP结构检查通过；保留健康status、service、specVersion和uiLanguage。未引入运行时Git子进程或放宽守卫。
+
+为用户本地测试，`npm start`预检确认realExecution DENIED、workers DISABLED；只启动本仓库127.0.0.1:3097，`/health`和`/projects`均200。F10更新时仅核对并重启本轮自建测试PID，原3090与辅助服务未操作。新增[人工测试清单](LOCAL-TESTING.md)，其中操作项尚待用户执行，不能写成人工验收PASS。专项证据仍在独立新库，不自动导入当前工作台。
+
+现无已确认且尚未修复的代码发现，三个修复后Go入口已按C6/C7/C8分轮完成限定回归；可进入本地隔离人工测试。公开范围新增1份说明至133项，配置/DB/profile/PNG/原始证据不提交。仍缺真实业务/平台/生产能力接线、U1真人归还、U2实际模型音频费用、U3真实编辑态及可信回执、U4新片真实数据、U5实际采用、非Windows/完整组合、小时天级/物理I/O、进程树回收、历史截图及正式GitHubApprove。真实编辑态与历史截图BLOCKED保留；模型选择、费用UNKNOWN和音频NOT_OBSERVED保持，无外发/付费/真实上传发布回复、原服务停止重启、合并或部署。

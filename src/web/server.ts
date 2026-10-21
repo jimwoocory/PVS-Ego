@@ -1063,10 +1063,14 @@ export function createAppServer(
           status: "ok",
           service: "product-video-studio",
           specVersion: "P1-0.3.0-p1-final",
-          localBuild: "agent-cycle-repair-20261016",
-          agentWorkflowRevision: "canvas-authorized-single-video-20261019.1",
           uiLanguage: "zh-CN",
-          sourceRevision: "9a94093"
+          sourceRevision: null,
+          sourceRevisionStatus: "NOT_EMBEDDED_USE_CHECKOUT_GIT",
+          baseline: {
+            localBuild: "agent-cycle-repair-20261016",
+            agentWorkflowRevision: "canvas-authorized-single-video-20261019.1",
+            sourceRevision: "9a94093"
+          }
         });
       }
 

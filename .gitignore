@@ -61,3 +61,4 @@ tests/isolation-business-u2-u5.test.mjs
 
 !docs/PUBLIC-CHANGE-REVIEW-2026-10-21.md
 !docs/PR1-FILE-REVIEW-COVERAGE-2026-10-21.md
+!docs/LOCAL-TESTING.md
