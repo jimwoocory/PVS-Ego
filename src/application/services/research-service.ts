@@ -1226,8 +1226,14 @@ export class ResearchService {
     let run=await this.repo.findRun(runId);
     if(!run||run.projectId!==projectId||run.mode!=='BASIC'||run.status!=='BLOCKED'||run.browserState?.collectionOnly!==true||!['BROWSER_PROVIDER_ERROR','BROWSER_SESSION_EXPIRED','LOGIN_REQUIRED','CAPTCHA_REQUIRED','RISK_CONTROL'].includes(run.blockerCode??''))throw new DomainValidationError('当前研究不允许仅采集续接');
     let evidence=await this.repo.listEvidence(runId);
+    if(evidence.some(e=>e.projectId!==projectId||e.runId!==runId))throw new DomainValidationError('原研究证据归属不一致，保留记录，不重新采集');
     for(const source of run.sourceUrls){
-      if(evidence.some(e=>e.status==='ACTIVE'&&e.sourceUrl===source.url))continue;
+      const saved=evidence.filter(e=>e.status==='ACTIVE'&&(e.sourceUrl===source.url||e.sourceCapture?.sourceUrl===source.url));
+      for(const item of saved){
+        const proof=item.sourceCapture;
+        if(proof&&(proof.finalUrl!==item.sourceUrl||proof.contentHash!==item.contentHash||proof.fetchedAt!==item.fetchedAt))throw new DomainValidationError('原研究来源回执与保存证据不一致，停止续接，不自动重读');
+      }
+      if(saved.length)continue;
       try{
         const doc=await this.webProvider.fetchSource({...source,...(run.browserState.resumeToken?{browserResumeHandle:run.browserState.resumeToken}:{})},{projectId,runId});
         const id='rce-'+hashValue({projectId,runId,sourceUrl:doc.finalUrl,contentHash:doc.contentHash});

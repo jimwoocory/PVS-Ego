@@ -30,7 +30,8 @@
     "test:u4-schedule-durable": "node scripts/run-u4-schedule-durability.mjs",
     "test:u45-workbench-review": "node scripts/run-u45-workbench-review.mjs",
     "test:pr1-resume-atomic": "node scripts/run-pr1-resume-atomic.mjs",
-    "test:pr1-research-cache": "node scripts/run-pr1-research-cache.mjs"
+    "test:pr1-research-cache": "node scripts/run-pr1-research-cache.mjs",
+    "test:pr1-go-receipt": "node scripts/run-pr1-go-receipt.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",
