@@ -10,6 +10,8 @@ import {EgoResearchError,type EgoResearchRuntime,type EgoResearchBinding} from "
 import {LocalArtifactStore} from "../store/local-artifact-store.js";
 import {assertSafeResearchUrl,type ResearchAddressLookup} from "./http-web-research-provider.js";
 import {classifySource,normalizeResultUrl,blockedSearchHost,unsafeOrAdultHost} from "./public-search-research-provider.js";
+import {z} from "zod";
+import {readSavedResearchArtifact} from "../../application/services/saved-research-artifact.js";
 
 type Session={handle:string;projectId:string;runId:string;runtimeIdentity:string;binding:EgoResearchBinding;
   candidates:WebResearchSource[];completedQueries:string[];pending?:{kind:"SEARCH"|"SOURCE";url:string;query?:string};
@@ -27,7 +29,8 @@ export class EgoBrowserResearchProvider implements BrowserResearchProvider,WebRe
     const detail=error instanceof EgoResearchError?error.detailCode:error instanceof DomainValidationError?"URL_POLICY_DENIED":error instanceof ZodError?"CAPTURE_SCHEMA_"+error.issues.map(i=>i.path.join("_")).join("_").replace(/[^a-zA-Z0-9_]/g,"").slice(0,100):
       typeof (error as NodeJS.ErrnoException)?.code==="string"?/^[A-Z_]{2,50}$/.test((error as NodeJS.ErrnoException).code!)?(error as NodeJS.ErrnoException).code:"PROVIDER_FAILURE":error instanceof Error?error.name:"PROVIDER_FAILURE";
     return {status:"BLOCKED",blockerCode:code,message:"Ego只读研究已暂停："+code+(detail?"（"+detail+"）":""),
-      requiredUserAction:code==="BROWSER_SESSION_EXPIRED"?"检查原浏览器实例与控制权；由用户归还后继续原研究。宿主已重启时需要新的明确会话许可，不能恢复旧权限。":
+      requiredUserAction:detail==="CAPTURE_DIGEST_UNAVAILABLE"?"历史缓存缺少完整文件摘要，保留原记录并停止复用。可只读核对保存证据；重新采集需要另行明确原会话与来源范围，不自动重采或补写摘要。":
+        code==="BROWSER_SESSION_EXPIRED"?"检查原浏览器实例与控制权；由用户归还后继续原研究。宿主已重启时需要新的明确会话许可，不能恢复旧权限。":
         ["SCREENSHOT_TIMEOUT","SPACE_HIDDEN","SCREENSHOT_FAILED"].includes(detail??"")?"原研究Space隐藏或截图未完成；由用户检查并选择原Space后再明确继续同一研究。不会跳过截图、自动切换Space或转HTTP伪造页面证据。":
         detail==="URL_POLICY_DENIED"?"当前网址或DNS解析未通过既有研究地址策略；检查独立网络配置，保留原任务，不降低私网访问保护。":
         ["LOGIN_REQUIRED","CAPTCHA_REQUIRED","RISK_CONTROL"].includes(code)?"在原页面由用户完成登录或平台验证后归还控制，再继续原研究。不会自动登录、代答验证码或切换引擎。":"检查Ego候选配置和诊断后继续原研究；不自动改用其他引擎或创建替代任务。",
@@ -112,10 +115,10 @@ export class EgoBrowserResearchProvider implements BrowserResearchProvider,WebRe
     try{if(!context||!source.browserResumeHandle)throw new EgoResearchError("BROWSER_SESSION_EXPIRED");
       s=await this.session(context.projectId,context.runId,source.browserResumeHandle);
       if(!s.candidates.some(c=>c.url===source.url))throw new EgoResearchError("BROWSER_SESSION_EXPIRED");
+      const cached=s.captures[source.url];
+      if(cached){const document=await this.savedDocument(s,source,cached);await this.read(s);return document;}
       // Validate ownership even when reusing a previously saved immutable document.
       await this.read(s);
-      const cached=s.captures[source.url];
-      if(cached)return this.savedDocument(s,source,cached);
       const root=path.resolve(this.projectsRoot,s.projectId),tempRoot=path.join(root,".tmp"),dir=path.join(tempRoot,"ego-"+randomUUID());await fs.mkdir(dir,{recursive:true});
       try{const screenshot=path.join(dir,"page.png"),resume=s.pending?.kind==="SOURCE"&&s.pending.url===source.url;
         s.pending={kind:"SOURCE",url:source.url};await this.checkpoint(s);const capture=await this.read(s,resume?undefined:source.url,screenshot);
@@ -125,19 +128,17 @@ export class EgoBrowserResearchProvider implements BrowserResearchProvider,WebRe
         const doc=await store.writeImmutable({id:"ego-document:"+key,projectId:s.projectId,relativePath:"research/ego/"+s.runId+"/"+key+".json",bytes:Buffer.from(JSON.stringify(document)),kind:"OTHER",mimeType:"application/json",immutable:true});
         const screenshotBytes=await fs.readFile(screenshot);if(!screenshotBytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))throw new EgoResearchError("BROWSER_PROVIDER_ERROR");
         const image=await store.writeImmutable({id:"ego-screenshot:"+key,projectId:s.projectId,relativePath:"research/ego/"+s.runId+"/"+key+".png",bytes:screenshotBytes,kind:"OTHER",mimeType:"image/png",immutable:true});
-        const proof:ResearchSourceCapture={provider:this.id,documentArtifactId:doc.id,screenshotArtifactId:image.id,sourceUrl:source.url,finalUrl:capture.finalUrl,fetchedAt:capture.fetchedAt,contentHash,truncated:capture.truncated};
+        const proof:ResearchSourceCapture={provider:this.id,documentArtifactId:doc.id,screenshotArtifactId:image.id,documentSha256:doc.sha256!,screenshotSha256:image.sha256!,sourceUrl:source.url,finalUrl:capture.finalUrl,fetchedAt:capture.fetchedAt,contentHash,truncated:capture.truncated};
         s.captures[source.url]=proof;s.pending=undefined;await this.checkpoint(s);return {...document,sourceCapture:proof};
       }finally{if(path.resolve(dir).startsWith(tempRoot+path.sep))await fs.rm(dir,{recursive:true,force:true});}
     }catch(error){throw new BrowserResearchBlockedError(this.blocked(error,s?.handle??source.browserResumeHandle));}
   }
   private async savedDocument(s:Session,source:WebResearchSource,proof:ResearchSourceCapture){
-    const a=await this.artifacts.findById(proof.documentArtifactId),root=path.resolve(this.projectsRoot,s.projectId),file=a?path.resolve(root,a.relativePath):"";
-    if(!a||a.projectId!==s.projectId||a.integrityStatus!=="READY"||!file.startsWith(root+path.sep))throw new EgoResearchError("BROWSER_SESSION_EXPIRED");
-    const bytes=await fs.readFile(file);if(sha256Bytes(bytes)!==a.sha256)throw new EgoResearchError("BROWSER_SESSION_EXPIRED");
-    const document=JSON.parse(bytes.toString("utf8")) as WebResearchDocument;
-    if(document.sourceUrl!==source.url||sha256Bytes(Buffer.from(document.text))!==proof.contentHash)throw new EgoResearchError("BROWSER_SESSION_EXPIRED");
-    if(proof.screenshotArtifactId){const image=await this.artifacts.findById(proof.screenshotArtifactId),imagePath=image?path.resolve(root,image.relativePath):"";
-      if(!image||image.projectId!==s.projectId||image.integrityStatus!=="READY"||!imagePath.startsWith(root+path.sep)||sha256Bytes(await fs.readFile(imagePath))!==image.sha256)throw new EgoResearchError("BROWSER_SESSION_EXPIRED");}
+    if(proof.provider!==this.id||!proof.documentSha256||!proof.screenshotArtifactId||!proof.screenshotSha256)throw new EgoResearchError("BROWSER_SESSION_EXPIRED","CAPTURE_DIGEST_UNAVAILABLE");
+    const {bytes}=await readSavedResearchArtifact(this.artifacts,this.projectsRoot,{projectId:s.projectId,runId:s.runId,folder:'ego',artifactId:proof.documentArtifactId,mimeType:'application/json',expectedSha256:proof.documentSha256});
+    const document=z.object({sourceUrl:z.string().url(),finalUrl:z.string().url(),title:z.string().min(1),text:z.string().min(1).max(300000),excerpt:z.string(),fetchedAt:z.iso.datetime(),contentHash:z.string().regex(/^[a-f0-9]{64}$/)}).parse(JSON.parse(bytes.toString('utf8')));
+    if(document.sourceUrl!==source.url||document.sourceUrl!==proof.sourceUrl||document.finalUrl!==proof.finalUrl||document.fetchedAt!==proof.fetchedAt||document.contentHash!==proof.contentHash||sha256Bytes(Buffer.from(document.text))!==proof.contentHash||document.excerpt!==document.text.slice(0,4000))throw new EgoResearchError("BROWSER_SESSION_EXPIRED","CAPTURE_BINDING_CHANGED");
+    await readSavedResearchArtifact(this.artifacts,this.projectsRoot,{projectId:s.projectId,runId:s.runId,folder:'ego',artifactId:proof.screenshotArtifactId,mimeType:'image/png',expectedSha256:proof.screenshotSha256});
     return {...document,sourceType:source.sourceType,sourceCapture:proof};
   }
 }
