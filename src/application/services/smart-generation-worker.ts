@@ -50,11 +50,25 @@ export function startSmartGenerationWorker(service: SmartGenerationService, opti
 } = {}): () => void {
   const policy: SmartWorkerPolicy = options.policy ??
     (options.scope ? { mode: "SCOPED", scope: options.scope } : { mode: "ALL" });
+  if (policy.mode === "DISABLED") return () => {};
   let stopped = false, working = false;
+  let startupRecovered = false;
   const tick = async () => {
     if (stopped || working) return;
     working = true;
     try {
+      // Recovery and advancement share the same single-flight guard. Retry a
+      // failed startup on a later tick; never advance while it is unresolved.
+      if (policy.mode === "ALL" && !startupRecovered) {
+        await service.recoverAbandoned();
+        startupRecovered = true;
+      }
+      if (stopped) return;
+      if (policy.mode === "SCOPED") {
+        // A lease can become abandoned long after startup, too.
+        await service.recoverAbandonedScoped(policy.scope.projectId, policy.scope.runId);
+      }
+      if (stopped) return;
       // A scoped launch must not list, recover or mutate historical runs.
       const originalRuns = policy.mode === "SCOPED"
         ? [await service.get(policy.scope.projectId, policy.scope.runId)].filter(
@@ -62,6 +76,7 @@ export function startSmartGenerationWorker(service: SmartGenerationService, opti
         )
         : await service.list();
       for (const original of originalRuns) {
+        if (stopped) break;
         // Reading the task index never grants execution permission to old runs.
         if (!canWorkerAdvanceRun(policy, original.projectId, original.id, original.autoAdvanceGrant)) continue;
         if (policy.mode === "MANAGED") {
@@ -83,16 +98,6 @@ export function startSmartGenerationWorker(service: SmartGenerationService, opti
   };
   const timer = setInterval(() => { void tick(); }, Math.max(1000, options.intervalMs ?? 5000));
   timer.unref();
-  if (policy.mode === "SCOPED") {
-    // At startup recover ONLY the exact scoped run.
-    void service.recoverAbandonedScoped(policy.scope.projectId, policy.scope.runId)
-      .then(tick)
-      .catch((error) => options.onError?.(error));
-  } else if (policy.mode === "MANAGED") {
-    // NO global lease recovery or historical Run advancement on startup.
-    void tick();
-  } else if (policy.mode === "ALL") {
-    void service.recoverAbandoned().then(tick).catch((error) => options.onError?.(error));
-  }
+  void tick();
   return () => { stopped = true; clearInterval(timer); };
 }

@@ -274,6 +274,9 @@ func (b *bridge) run(ctx context.Context, r request, j *job) {
 	input, _ := json.Marshal(map[string]any{"id": r.ID, "mode": r.Mode, "instanceId": c.InstanceID, "origin": c.Origin, "nonce": c.Nonce, "layoutPath": filepath.Join(c.DataDir, "workspaces.json"),
 		"spaceName": "pvs-research-" + r.Scope.ProjectID + "-" + r.ResearchRunID, "binding": r.Binding, "sessionId": sessionID, "captureScreenshot": r.CaptureScreenshot, "screenshotPath": screenshotPath})
 	cmd := exec.CommandContext(ctx, c.Node, c.CLI, "nodejs", "--sdk-path", c.SDK)
+	// Bound os/exec's stderr copy even if a descendant inherits its pipe.
+	// The context separately closes our manually scanned stdout pipe below.
+	cmd.WaitDelay = 250 * time.Millisecond
 	cmd.Dir = c.Session
 	for _, k := range []string{"SystemRoot", "WINDIR", "COMSPEC", "PATHEXT"} {
 		if v := os.Getenv(k); v != "" {
@@ -288,15 +291,27 @@ func (b *bridge) run(ctx context.Context, r request, j *job) {
 	var opened *sessionBinding
 	blockedCode := ""
 	screenshotReceived := false
+	visibility := ""
+	pageSpace, pageTarget := 0, ""
 	if e == nil {
 		e = cmd.Start()
 	}
 	if e == nil {
+		stopReading := context.AfterFunc(ctx, func() { _ = stdout.Close() })
+		defer stopReading()
+		defer stdout.Close()
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 4096), 2_000_000)
-		count := 0
+		count, lines, outputBytes := 0, 0, 0
 		for scanner.Scan() {
 			line := scanner.Text()
+			lines++
+			outputBytes += len(line)
+			if lines > 128 || outputBytes > 4_000_000 {
+				protocol = true
+				j.cancel()
+				break
+			}
 			if !strings.HasPrefix(line, "PVS_GO_EVENT ") {
 				continue
 			}
@@ -324,6 +339,9 @@ func (b *bridge) run(ctx context.Context, r request, j *job) {
 				j.cancel()
 				break
 			}
+			if done || (blockedCode != "" && event.Kind != "done") {
+				protocol = true
+			}
 			switch event.Kind {
 			case "connected":
 				if event.InstanceID != c.InstanceID || connected {
@@ -335,20 +353,22 @@ func (b *bridge) run(ctx context.Context, r request, j *job) {
 					protocol = true
 				}
 				pageBound = true
+				pageSpace, pageTarget = event.SpaceID, event.TargetID
 				if r.Mode == "session-read" && (event.SpaceID != r.Binding.SpaceID || event.TargetID != r.Binding.TargetID) {
 					protocol = true
 				}
 			case "session":
 				s := event.Binding
-				if r.Mode != "session-open" || !pageBound || opened != nil || s == nil || s.InstanceID != c.InstanceID || s.SpaceID < 1 || s.TargetID == "" || s.SpaceName != "pvs-research-"+r.Scope.ProjectID+"-"+r.ResearchRunID || s.ProfileID != "Default" || s.SessionID != sessionID {
+				if r.Mode != "session-open" || !pageBound || opened != nil || s == nil || s.InstanceID != c.InstanceID || s.SpaceID != pageSpace || s.TargetID != pageTarget || s.SpaceName != "pvs-research-"+r.Scope.ProjectID+"-"+r.ResearchRunID || s.ProfileID != "Default" || s.SessionID != sessionID {
 					protocol = true
 				} else {
 					opened = s
 				}
 			case "visibility":
-				if r.Mode != "session-read" || !pageBound || event.VisibilitySource != "OWNED_HOST_LAYOUT_SNAPSHOT" || (event.Visibility != "visible" && event.Visibility != "hidden") {
+				if r.Mode != "session-read" || !pageBound || visibility != "" || captured || event.VisibilitySource != "OWNED_HOST_LAYOUT_SNAPSHOT" || (event.Visibility != "visible" && event.Visibility != "hidden") {
 					protocol = true
 				}
+				visibility = event.Visibility
 			case "blocked":
 				if r.Mode != "session-open" && r.Mode != "session-read" {
 					protocol = true
@@ -360,7 +380,7 @@ func (b *bridge) run(ctx context.Context, r request, j *job) {
 					protocol = true
 				}
 			case "screenshot":
-				if r.Mode != "session-read" || !r.CaptureScreenshot || !captured || screenshotReceived || done || len(event.PNG) > 1_400_000 {
+				if r.Mode != "session-read" || !r.CaptureScreenshot || visibility != "visible" || !captured || screenshotReceived || done || len(event.PNG) > 1_400_000 {
 					protocol = true
 				} else {
 					png, err := base64.StdEncoding.DecodeString(event.PNG)
@@ -371,17 +391,17 @@ func (b *bridge) run(ctx context.Context, r request, j *job) {
 					}
 				}
 			case "sample":
-				if !connected || event.Tick < 0 {
+				if r.Mode != "observe" || !pageBound || event.Tick < 0 {
 					protocol = true
 				}
 			case "done":
-				if done || (blockedCode == "" && (!connected || (r.Mode == "capture" && !captured) || (r.Mode == "session-open" && opened == nil) || (r.Mode == "session-read" && (!captured || (r.CaptureScreenshot && !screenshotReceived))))) {
+				if done || (blockedCode == "" && (!connected || (r.Mode == "observe" && !pageBound) || (r.Mode == "capture" && !captured) || (r.Mode == "session-open" && opened == nil) || (r.Mode == "session-read" && (visibility == "" || !captured || (r.CaptureScreenshot && !screenshotReceived))))) {
 					protocol = true
 				}
 				done = true
 			case "document":
 				d := event.Document
-				if (r.Mode != "capture" && r.Mode != "session-read") || !pageBound || captured || done || d == nil || blockedCode != "" {
+				if (r.Mode != "capture" && r.Mode != "session-read") || !pageBound || (r.Mode == "session-read" && visibility == "") || captured || done || d == nil || blockedCode != "" {
 					protocol = true
 				} else {
 					_, timeErr := time.Parse(time.RFC3339Nano, d.FetchedAt)
@@ -465,28 +485,9 @@ func (b *bridge) close() {
 	b.mu.Unlock()
 	b.wg.Wait()
 }
-func main() {
-	file := flag.String("config", "", "explicit local config")
-	flag.Parse()
-	if flag.NArg() != 0 || *file == "" {
-		fmt.Fprintln(os.Stderr, "CONFIG_REQUIRED")
-		os.Exit(2)
-	}
-	data, e := os.ReadFile(*file)
-	var c config
-	if e == nil {
-		e = decode(data, &c)
-	}
-	if e == nil {
-		e = c.validate(*file)
-	}
-	if e != nil {
-		fmt.Fprintln(os.Stderr, e.Error())
-		os.Exit(2)
-	}
-	b := &bridge{cfg: c, jobs: make(map[string]*job), out: os.Stdout}
-	b.emit("ready", "", "", map[string]any{"contract": c.Contract, "instanceId": c.InstanceID, "productionEnabled": false})
-	scanner := bufio.NewScanner(os.Stdin)
+func (b *bridge) serve(input io.Reader) error {
+	b.emit("ready", "", "", map[string]any{"contract": b.cfg.Contract, "instanceId": b.cfg.InstanceID, "productionEnabled": false})
+	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 4096), 16384)
 	for scanner.Scan() {
 		var r request
@@ -509,7 +510,33 @@ func main() {
 	}
 	b.close()
 	if scanner.Err() != nil {
-		fmt.Fprintln(os.Stderr, "INPUT_LIMIT")
+		return errors.New("INPUT_LIMIT")
+	}
+	return nil
+}
+
+func main() {
+	file := flag.String("config", "", "explicit local config")
+	flag.Parse()
+	if flag.NArg() != 0 || *file == "" {
+		fmt.Fprintln(os.Stderr, "CONFIG_REQUIRED")
+		os.Exit(2)
+	}
+	data, e := os.ReadFile(*file)
+	var c config
+	if e == nil {
+		e = decode(data, &c)
+	}
+	if e == nil {
+		e = c.validate(*file)
+	}
+	if e != nil {
+		fmt.Fprintln(os.Stderr, e.Error())
+		os.Exit(2)
+	}
+	b := &bridge{cfg: c, jobs: make(map[string]*job), out: os.Stdout}
+	if e := b.serve(os.Stdin); e != nil {
+		fmt.Fprintln(os.Stderr, e.Error())
 		os.Exit(2)
 	}
 }
