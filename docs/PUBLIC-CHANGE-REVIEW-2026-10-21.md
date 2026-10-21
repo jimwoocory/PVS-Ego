@@ -149,3 +149,15 @@ ALL索引分支独立运行、小时/天级浸泡、万级以上规模、生产�
 **F9/P2：Go专项入口依赖未发布的历史位置文件。** `run-go-bridge-isolated`、`run-go-research-isolated`、`run-go-u1-session`无条件读取忽略目录中的旧位置JSON，仓库无生成入口，干净checkout即使setup/build也会提前ENOENT。现在创建本仓库独立UUID会话、缓存及尝试回执，路径通过原confined核验；不读取旧状态、不共享历史缓存、不改变原业务守卫或人工许可。边界套件的迁移子项用明确不存在的编译器检查三个runner：新会话/cache已建立、失败原因确为该编译器ENOENT、无final PASS。该负例不会启动Go/Ego或宿主，不能充当这三个完整Go专项的重新验收。
 
 最新head需核验[对应CI检查](https://github.com/jimwoocory/PVS-Ego/pull/1/checks)。非Windows、完整业务组合/真实Go专项、其他R1–R8、正式GitHub批准仍缺；U3真实编辑态和截图BLOCKED保留。模型仍为aihubmix/deepseek-v4.1-flash，音频NOT_OBSERVED、费用UNKNOWN；没有业务模型/平台调用、素材外发、付费生成、真实上传/发布/回复、原服务操作、合并或部署。
+
+## PR #1 修复后 Go 桥完整隔离回归 C6
+
+以 `304af6c` 为起点，按单轮一个套件优先验证三个修复入口中的 `test:go-bridge`。运行前构建退出0，使用显式本地Go1.26.9和既有Ego代码、此次新UUID会话及Go缓存、新Ego profile，不读取旧位置JSON或复制账号/业务状态。最终完整套件 **9 PASS/0 FAIL（8子项加父项）、退出0、164002.64ms**。本轮没有发现新的已确认产品代码缺陷，也没有修改产品源码；更新4份公开说明，PR仍132个文件。
+
+实际覆盖Go→原Node CLI/SDK→新Ego宿主的本机连接、流式采样、主动取消、1800ms有界超时、任意操作/脚本/超限/重复/并发拒绝、原Agent确认/上下文/版本/取消/幂等、运行中租约保护、HTTP/UI、二进制摘要/实例错配、EOF取消及宿主断连后不自动重启/重投。87个桥事件及固定nonce合成页6次GET；Go构建与套件退出0，记录的host/bridge/business/lifecycle进程均closed且退出0。它只证明此只读候选链，生产默认工厂仍未接线，业务仓库是内存实现，不称实际DB取消验收或远端动作回滚。
+
+原工作台由内置浏览器实际点击连接、观察中取消和超时，终态及工作进程退出确认可见；取消9次采样、超时14次采样。测试控制端读取固定`/__fixture-state`并POST`/__fixture-finish`核验3次桥调用/1次取消/0模型、原门禁和不重试，再保存真实浏览器回执并等待父进程清理。没有用伪造回执代替页面操作。自建标签最终关闭。
+
+失败分开保留：Tabbit在新标签创建前出现`Target.createTarget`协议错误，诊断确认任务idle/无拥有标签后正常finish；未在其上重放页面操作。首次内置浏览器取消因旧AX引用失效且错过有限采样窗口，状态实际完成而非取消，该整轮明确记录 **7 PASS/2 FAIL、退出1**，无final PASS。第二轮使用当前语义控件，在一次调用中启动、等待非零采样并取消；没有延长时限、放松断言或修改守卫，只复跑同一完整套件取得最终9/9。内置浏览器截图目视检查成功但没有保存交付图片，不能覆盖历史截图BLOCKED项。
+
+修复后 `test:go-research`、`test:go-u1-session` 完整回归仍待下一轮依次验证；本轮不运行第二个本地专项。既有GitHub CI继续按提交自动检查Windows构建/边界套件，不将其计入Go专项通过数，也不自动加入交互式Go/平台测试。非Windows、真实业务宿主/DB接线、进程树回收、小时/天级/设备故障、U1真人、U2模型音频费用、U3真实编辑态BLOCKED、U4真实新片采集、U5实际采用及正式GitHubApprove仍未验收。模型保持aihubmix/deepseek-v4.1-flash，音频NOT_OBSERVED、费用UNKNOWN；无模型推理、真实平台、素材外发、付费生成、上传/发布/回复、原服务操作、合并或部署。
