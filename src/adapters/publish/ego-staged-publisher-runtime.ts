@@ -29,7 +29,7 @@ export class EgoStagedPublisherRuntime implements DouyinBrowserPublisherRuntime,
  constructor(config:EgoStagedPublisherConfig,private readonly verifyUpload:EgoUploadVerifier){
   this.config=egoStagedPublisherConfigSchema.parse(config);
   const url=new URL(this.config.editorUrl);
-  if(url.protocol!=="http:"||url.hostname!=="127.0.0.1"||url.username||url.password||![config.cliPath,config.sdkPath,config.dataDir].every(path.isAbsolute))throw new DomainValidationError("Ego 候选仅允许明确指定的本机模拟页和绝对路径；真实平台适配尚未验收");
+  if(url.protocol!=="http:"||url.hostname!=="127.0.0.1"||!url.port||[3090,3092,9223,19422,19423].includes(Number(url.port))||url.username||url.password||![config.cliPath,config.sdkPath,config.dataDir].every(path.isAbsolute))throw new DomainValidationError("Ego 候选仅允许明确指定且避开原服务端口的本机模拟页和绝对路径；真实平台适配尚未验收");
   if(typeof verifyUpload!=="function")throw new DomainValidationError("缺少独立上传证明校验，不接受页面自报成功");
   this.identity="ego-staged:"+hashValue(this.config);
  }

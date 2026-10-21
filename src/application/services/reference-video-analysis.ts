@@ -13,6 +13,7 @@ import {
 import { hashValue,sha256Bytes } from "../../domain/hashing.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import { LocalArtifactStore } from "../../adapters/store/local-artifact-store.js";
+import { readReferenceEvidence, samplingManifest, sameEvidence, evidenceDenied } from "./reference-video-evidence.js";
 import {
   createReferenceVideoBrowserPreview,
   probeReferenceVideo,
@@ -84,15 +85,22 @@ export class ReferenceVideoAnalysisService {
 
   private async verifyProfileArtifacts(profile:ReferenceVideoProfile,projectId:string):Promise<void>{
     referenceVideoProfileForPrompt(profile,projectId);
-    const store=new LocalArtifactStore(path.resolve(this.projectsRoot,projectId),this.artifacts);
-    const source=await this.artifacts.findById(profile.videoArtifactId);
-    if(!source||source.projectId!==projectId||source.integrityStatus!=="READY"||source.sha256!==profile.videoArtifactHash||
-       sha256Bytes(await fs.readFile(store.resolveArtifactPath(source.relativePath)))!==profile.videoArtifactHash)throw new DomainValidationError("参考视频源文件证据已失效，停止复用分析，不自动重提模型请求");
+    if(profile.observation?.version!=="reference-observation-v3"||!profile.observation.samplingManifest) evidenceDenied();
+    await readReferenceEvidence(this.artifacts,this.projectsRoot,projectId,profile.videoArtifactId,profile.videoArtifactHash,["video/mp4","video/quicktime"]);
     for(const frame of profile.observation!.frames){
-      const evidence=await this.artifacts.findById(frame.artifactId);
-      if(!evidence||evidence.projectId!==projectId||evidence.integrityStatus!=="READY"||evidence.sha256!==frame.sha256||
-         sha256Bytes(await fs.readFile(store.resolveArtifactPath(evidence.relativePath)))!==frame.sha256)throw new DomainValidationError("参考视频采样帧证据已失效，停止复用分析，不自动重提模型请求");
+      await readReferenceEvidence(this.artifacts,this.projectsRoot,projectId,frame.artifactId,frame.sha256,["image/jpeg"],16*1024*1024);
     }
+    const ref=profile.observation.samplingManifest;
+    const bytes=await readReferenceEvidence(this.artifacts,this.projectsRoot,projectId,ref.artifactId,ref.sha256,["application/json"],65536);
+    let manifest:unknown;try{manifest=JSON.parse(bytes.toString("utf8"));}catch{evidenceDenied();}
+    if(!sameEvidence(manifest,samplingManifest(projectId,{artifactId:profile.videoArtifactId,sha256:profile.videoArtifactHash},profile.media,profile.observation.frames)))evidenceDenied();
+    if(profile.observation.audio.status!==(profile.media.hasAudio?"NOT_OBSERVED":"NO_TRACK")||profile.observation.frames.length<1||profile.observation.frames.length>10)evidenceDenied();
+  }
+
+  async assertCurrentEvidence(profile:ReferenceVideoProfile,projectId:string):Promise<void>{
+    const current=await this.repo.latestActive(projectId);
+    if(!current||profile.status!=="ACTIVE"||current.id!==profile.id||current.version!==profile.version||current.contentHash!==profile.contentHash)evidenceDenied();
+    await this.verifyProfileArtifacts(profile,projectId);
   }
 
   async list(projectId: string): Promise<ReferenceVideoProfile[]> {
@@ -128,11 +136,11 @@ export class ReferenceVideoAnalysisService {
     const projectRoot = path.resolve(this.projectsRoot, input.projectId);
     const store = new LocalArtifactStore(projectRoot, this.artifacts);
     const videoPath = store.resolveArtifactPath(artifact.relativePath);
-    if(sha256Bytes(await fs.readFile(videoPath))!==artifact.sha256)throw new DomainValidationError("参考视频实际文件SHA与Artifact不一致");
+    await readReferenceEvidence(this.artifacts,this.projectsRoot,input.projectId,artifact.id,artifact.sha256,["video/mp4","video/quicktime"]);
     // Reuse this project's verified current analysis, never another project's file or an unobserved historical profile.
     const cached=(await this.repo.listProfiles(input.projectId)).find(p=>p.status==="ACTIVE"&&p.videoArtifactHash===artifact.sha256);
     if(cached&&cached.observation?.version!=="reference-observation-v3")throw new DomainValidationError("历史分析没有实际帧时间戳证明；保留历史，需用户确认重新分析，不自动重提模型请求");
-    if(cached){await this.verifyProfileArtifacts(cached,input.projectId);return cached;}
+    if(cached){await this.assertCurrentEvidence(cached,input.projectId);return cached;}
     const mediaInfo = await this.media.probeReferenceVideo(videoPath);
     const tempDir = path.join(
       projectRoot,
@@ -153,6 +161,7 @@ export class ReferenceVideoAnalysisService {
             item.integrityStatus === "READY" &&
             item.mimeType === "video/mp4"
         );
+        if(existingPreview){await readReferenceEvidence(this.artifacts,this.projectsRoot,input.projectId,existingPreview.id,existingPreview.sha256??"",["video/mp4"]);}
         if (!existingPreview) {
           const previewPath = path.join(
             tempDir,
@@ -182,22 +191,31 @@ export class ReferenceVideoAnalysisService {
         maxFrames: 10
       });
       const frameEvidence:NonNullable<ReferenceVideoProfile["observation"]>["frames"]=[];
+      if(!sampledFrames.length||sampledFrames.length>10||sampledFrames.some((f,i)=>f.mimeType!=="image/jpeg"||!Number.isSafeInteger(f.timestampMs)||f.timestampMs<0||f.timestampMs>=mediaInfo.durationMs||(i>0&&f.timestampMs<=sampledFrames[i-1]!.timestampMs)))evidenceDenied();
+      const media = [];
       for(const frame of sampledFrames){const bytes=await fs.readFile(frame.path),sha256=sha256Bytes(bytes),key=hashValue({projectId:input.projectId,source:artifact.sha256,timestampMs:frame.timestampMs,sha256});
         let saved=await this.artifacts.findById("reference-frame:"+key);
         if(!saved)saved=await store.writeImmutable({id:"reference-frame:"+key,projectId:input.projectId,kind:"OTHER",relativePath:"reference-video/evidence/"+key+".jpg",bytes,mimeType:"image/jpeg",immutable:true});
-        if(saved.projectId!==input.projectId||saved.sha256!==sha256||sha256Bytes(await fs.readFile(store.resolveArtifactPath(saved.relativePath)))!==sha256)throw new DomainValidationError("参考视频采样帧证据已改变");
-        frameEvidence.push({artifactId:saved.id,sha256,timestampMs:frame.timestampMs});}
-      const media = [];
-      for (const frame of sampledFrames) {
-        const bytes = await fs.readFile(frame.path);
+        const verified=await readReferenceEvidence(this.artifacts,this.projectsRoot,input.projectId,saved.id,sha256,["image/jpeg"],16*1024*1024);
+        frameEvidence.push({artifactId:saved.id,sha256,timestampMs:frame.timestampMs});
         media.push({
           type: "image" as const,
           mimeType: frame.mimeType,
-          dataBase64: bytes.toString("base64"),
+          dataBase64: verified.toString("base64"),
           label: "sample@" + frame.timestampMs + "ms"
         });
       }
-
+      const observedMedia={durationMs:mediaInfo.durationMs,...(mediaInfo.width?{width:mediaInfo.width}:{}),...(mediaInfo.height?{height:mediaInfo.height}:{}),...(mediaInfo.frameRate?{frameRate:mediaInfo.frameRate}:{}),hasAudio:mediaInfo.hasAudio,sampledFrameCount:frameEvidence.length,sceneCutTimestampsMs:mediaInfo.sceneCutTimestampsMs};
+      const manifestBytes=Buffer.from(JSON.stringify(samplingManifest(input.projectId,{artifactId:artifact.id,sha256:artifact.sha256},observedMedia,frameEvidence)));
+      const manifestHash=sha256Bytes(manifestBytes),manifestId="reference-sampling:"+manifestHash;
+      if(!await this.artifacts.findById(manifestId))await store.writeImmutable({id:manifestId,projectId:input.projectId,kind:"OTHER",relativePath:"reference-video/evidence/"+manifestHash+".json",bytes:manifestBytes,mimeType:"application/json",immutable:true});
+      const manifestRef={artifactId:manifestId,sha256:manifestHash};
+      const verifyInputs=async()=>{
+        await readReferenceEvidence(this.artifacts,this.projectsRoot,input.projectId,artifact.id,artifact.sha256!,["video/mp4","video/quicktime"]);
+        for(const frame of frameEvidence)await readReferenceEvidence(this.artifacts,this.projectsRoot,input.projectId,frame.artifactId,frame.sha256,["image/jpeg"],16*1024*1024);
+        await readReferenceEvidence(this.artifacts,this.projectsRoot,input.projectId,manifestId,manifestHash,["application/json"],65536);
+      };
+      await verifyInputs();
       const generation = await generateStructuredJson(this.runtime, {
         task:
           "Analyze a reference marketing video into a reusable ReferenceVideoProfile for a new, original product video.",
@@ -227,7 +245,7 @@ export class ReferenceVideoAnalysisService {
             sceneCutTimestampsMs: mediaInfo.sceneCutTimestampsMs
           },
           sampledFrames: frameEvidence,
-          observation:{frames:frameEvidence,timing:{status:"DECODED_FRAME_PTS",origin:"FIRST_VIDEO_FRAME",precisionMs:1},audio:{status:mediaInfo.hasAudio?"NOT_OBSERVED":"NO_TRACK"},samplingIsPartial:true},
+          observation:{samplingManifest:manifestRef,frames:frameEvidence,timing:{status:"DECODED_FRAME_PTS",origin:"FIRST_VIDEO_FRAME",precisionMs:1},audio:{status:mediaInfo.hasAudio?"NOT_OBSERVED":"NO_TRACK"},samplingIsPartial:true},
           copyPolicy: "STRUCTURE_AND_METHOD_ONLY"
         },
         media,
@@ -264,6 +282,7 @@ export class ReferenceVideoAnalysisService {
           step: "REFERENCE_VIDEO_ANALYSIS"
         }
       });
+      await verifyInputs();
       const proposal = proposalSchema.parse(generation.data);
       if(proposal.frameObservations.some(f=>!sampledFrames.some(s=>s.timestampMs===f.timestampMs)))throw new DomainValidationError("参考视频分析引用了未实际采样的时间戳");
       if(new Set(proposal.frameObservations.map(f=>f.timestampMs)).size!==proposal.frameObservations.length)throw new DomainValidationError("参考视频同一帧出现重复识别结果，停止保存");
@@ -330,7 +349,7 @@ export class ReferenceVideoAnalysisService {
         ctaPattern: proposal.ctaPattern,
         reusableStylePrinciples: proposal.reusableStylePrinciples,
         copyGuard: "STRUCTURE_AND_METHOD_ONLY",
-        observation:{version:"reference-observation-v3",sourceSha256:artifact.sha256,frames:frameEvidence,
+        observation:{version:"reference-observation-v3",sourceSha256:artifact.sha256,samplingManifest:manifestRef,frames:frameEvidence,
           timing:{status:"DECODED_FRAME_PTS",origin:"FIRST_VIDEO_FRAME",precisionMs:1},
           audio:{status:mediaInfo.hasAudio?"NOT_OBSERVED":"NO_TRACK",reason:mediaInfo.hasAudio?"本次仅发送真实采样帧；外发音频和可能收费的分析需适用许可与已配置模型能力，不自动切模型。":"文件无音轨。"},
           ocr:{status:proposal.frameObservations.some(f=>f.visibleText)?"SAMPLED_FRAMES_ONLY":"NOT_OBSERVED",reason:"仅能观察已保存采样帧，不代表全文字幕、完整视频或音频转写。"},
@@ -344,6 +363,7 @@ export class ReferenceVideoAnalysisService {
         ...profileWithoutHash,
         contentHash: profileContentHash(profileWithoutHash)
       });
+      await this.verifyProfileArtifacts(profile,input.projectId);
       return this.repo.saveProfile(profile);
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true }).catch(

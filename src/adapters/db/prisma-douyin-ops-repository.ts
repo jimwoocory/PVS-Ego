@@ -5,6 +5,7 @@ import type {DouyinOpsCommentPage} from "../../application/ports/douyin-ops-runt
 import {randomUUID} from "node:crypto";
 import {observationEvidenceSchema} from "../../domain/douyin-feedback-evidence.js";
 import type { PrismaClient } from "@prisma/client";
+import {assertOperationsWriteFence} from "./operations-write-fence.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import {hashValue,sha256Text} from "../../domain/hashing.js";
 import {metricKeys,type MetricAvailability} from "../../domain/douyin-observation.js";
@@ -559,8 +560,13 @@ export class PrismaDouyinOpsRepository
   }
 
   async createMetricSnapshot(
-    input: DouyinMetricSnapshot
+    input: DouyinMetricSnapshot,
+    fence?:import("../../application/ports/operations-write-fence.js").OperationsWriteFence
   ): Promise<DouyinMetricSnapshot> {
+    if(fence){
+      if(fence.projectId!==input.projectId)throw new DomainValidationError("运营保存权限不属于当前项目");
+      return this.db.$transaction(async tx=>{await assertOperationsWriteFence(tx,fence);return new PrismaDouyinOpsRepository(tx as PrismaClient).createMetricSnapshot(input);});
+    }
     const value = douyinMetricSnapshotSchema.parse(input);
     const prior=await this.findMetricSnapshotByCaptureKey(value.projectId,value.captureKey);
     if(prior){if(prior.bindingId!==value.bindingId||prior.awemeId!==value.awemeId||prior.contentHash!==value.contentHash)throw new DomainValidationError("同一指标采集标识不能覆盖不同作品或内容");return prior;}
@@ -651,13 +657,14 @@ export class PrismaDouyinOpsRepository
   }
 
   async upsertComments(
-    input: DouyinComment[],pageEvidence?:CommentPageEvidence
+    input: DouyinComment[],pageEvidence?:CommentPageEvidence,fence?:import("../../application/ports/operations-write-fence.js").OperationsWriteFence
   ): Promise<DouyinComment[]> {
     const values = input.map((item) =>
       douyinCommentSchema.parse(item)
     );
     if(!pageEvidence&&values.some(v=>v.observation?.source==="RAW_PAGE_COMPARISON"))throw new DomainValidationError("带原始来源的评论必须与原始页一起保存");
     return this.db.$transaction(async tx => {
+    if(fence){if(values.some(v=>v.projectId!==fence.projectId)||pageEvidence&&pageEvidence.projectId!==fence.projectId)throw new DomainValidationError("运营评论保存权限不属于当前项目");await assertOperationsWriteFence(tx,fence);}
     if(pageEvidence){
       const evidence=commentPageEvidenceSchema.parse(pageEvidence),audit=auditDouyinReadPage({...evidence,normalized:evidence.normalized as DouyinOpsCommentPage}),key="douyin-comment-page:"+hashValue(evidence);
       if(!audit.accepted||values.some(v=>v.projectId!==evidence.projectId||v.bindingId!==evidence.bindingId||v.awemeId!==evidence.awemeId||(v.parentCid??null)!==evidence.parentCid||v.observation?.pageEvidenceId!==key||v.observation.pageHash!==audit.rawHash||!audit.comments.some(c=>c.cid===v.cid)))throw new DomainValidationError("评论原始页证据与本次保存范围不一致");

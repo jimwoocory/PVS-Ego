@@ -28,7 +28,7 @@ export class EgoBrowserResearchProvider implements BrowserResearchProvider,WebRe
       typeof (error as NodeJS.ErrnoException)?.code==="string"?/^[A-Z_]{2,50}$/.test((error as NodeJS.ErrnoException).code!)?(error as NodeJS.ErrnoException).code:"PROVIDER_FAILURE":error instanceof Error?error.name:"PROVIDER_FAILURE";
     return {status:"BLOCKED",blockerCode:code,message:"Ego只读研究已暂停："+code+(detail?"（"+detail+"）":""),
       requiredUserAction:code==="BROWSER_SESSION_EXPIRED"?"检查原浏览器实例与控制权；由用户归还后继续原研究。宿主已重启时需要新的明确会话许可，不能恢复旧权限。":
-        detail==="SCREENSHOT_TIMEOUT"?"原页面截图超时；在独立Ego宿主中检查原研究Space是否可见，再继续同一研究。不会跳过截图、自动接管其他Space或转HTTP伪造页面证据。":
+        ["SCREENSHOT_TIMEOUT","SPACE_HIDDEN","SCREENSHOT_FAILED"].includes(detail??"")?"原研究Space隐藏或截图未完成；由用户检查并选择原Space后再明确继续同一研究。不会跳过截图、自动切换Space或转HTTP伪造页面证据。":
         detail==="URL_POLICY_DENIED"?"当前网址或DNS解析未通过既有研究地址策略；检查独立网络配置，保留原任务，不降低私网访问保护。":
         ["LOGIN_REQUIRED","CAPTCHA_REQUIRED","RISK_CONTROL"].includes(code)?"在原页面由用户完成登录或平台验证后归还控制，再继续原研究。不会自动登录、代答验证码或切换引擎。":"检查Ego候选配置和诊断后继续原研究；不自动改用其他引擎或创建替代任务。",
       browserState:{provider:this.id,...(handle?{resumeToken:handle}:{})}};
@@ -93,6 +93,19 @@ export class EgoBrowserResearchProvider implements BrowserResearchProvider,WebRe
     if(!context)throw new BrowserResearchBlockedError(this.blocked(new EgoResearchError("BROWSER_SESSION_EXPIRED"),source.browserResumeHandle));
     try{return await this.exclusive(context.projectId,context.runId,()=>this.fetchSourceUnlocked(source,context));}
     catch(error){if(error instanceof BrowserResearchBlockedError)throw error;throw new BrowserResearchBlockedError(this.blocked(error,source.browserResumeHandle));}
+  }
+  /** Explicit owned-page wiring, never discovery or a default HTTP fallback.
+   * The injected executor fixes the URL independently of caller page data. */
+  async fetchOwnedSource(source:WebResearchSource,context:{projectId:string;runId:string}):Promise<WebResearchDocument>{
+    if(!this.runtime.ownedSourceUrl||source.url!==this.runtime.ownedSourceUrl)throw new BrowserResearchBlockedError(this.blocked(new EgoResearchError('BROWSER_SESSION_EXPIRED','OWNED_SOURCE_REQUIRED')));
+    try{return await this.exclusive(context.projectId,context.runId,async()=>{
+      await this.safeUrl(source.url);
+      const s=await this.session(context.projectId,context.runId,source.browserResumeHandle);
+      if(!s.candidates.some(c=>c.url===source.url)){
+        s.candidates.push({...source,browserResumeHandle:s.handle});await this.checkpoint(s);
+      }
+      return this.fetchSourceUnlocked({...source,browserResumeHandle:s.handle},context);
+    });}catch(error){if(error instanceof BrowserResearchBlockedError)throw error;throw new BrowserResearchBlockedError(this.blocked(error,source.browserResumeHandle));}
   }
   private async fetchSourceUnlocked(source:WebResearchSource,context?:{projectId:string;runId:string}):Promise<WebResearchDocument>{
     let s:Session|undefined;

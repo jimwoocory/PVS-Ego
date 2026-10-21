@@ -18,7 +18,17 @@
     "serve": "node scripts/start-isolated.mjs --serve",
     "prepare:engines": "node scripts/install-local-engines.mjs",
     "prepare:browser-fixture": "node scripts/prepare-browser-click-fixture.mjs",
-    "test:browser": "node scripts/isolation-tools.mjs browser-test"
+    "test:browser": "node scripts/isolation-tools.mjs browser-test",
+    "test:go-bridge": "node scripts/run-go-bridge-isolated.mjs",
+    "test:go-durable": "node scripts/run-go-lifecycle-durability.mjs",
+    "test:go-research": "node scripts/run-go-research-isolated.mjs",
+    "test:evidence-review": "node scripts/run-evidence-review-isolated.mjs",
+    "test:go-capture-durable": "node scripts/run-go-capture-durability.mjs",
+    "test:go-u1-session": "node scripts/run-go-u1-session.mjs",
+    "test:u3-preflight-durable": "node scripts/run-u3-preflight-durability.mjs",
+    "test:u2-evidence-integrity": "node scripts/run-u2-evidence-integrity.mjs",
+    "test:u4-schedule-durable": "node scripts/run-u4-schedule-durability.mjs",
+    "test:u45-workbench-review": "node scripts/run-u45-workbench-review.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",

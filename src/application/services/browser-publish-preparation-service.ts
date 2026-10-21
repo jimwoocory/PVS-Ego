@@ -28,6 +28,9 @@ export class BrowserPublishPreparationService {
   return "READY_FOR_CONFIRMATION";
  }
  private async blocked(cp:Checkpoint){await this.append(cp,cp.scope,"BLOCKED",cp.binding,"REVALIDATION_FAILED_NO_AUTOMATIC_RETRY").catch(()=>undefined);}
+ private consent(cp:Checkpoint,input:{scopeHash?:string;revision?:number;expectedAccountId?:string}){
+  if(input.scopeHash!==cp.scopeHash||input.revision!==cp.version||input.expectedAccountId!==cp.scope.account.id)throw new DomainValidationError('需要原账号、当前范围及最新检查点确认；请刷新，旧页面不能接管或续接');
+ }
  async prepare(input:{projectId:string;packageId:string;expectedAccountId:string;confirmedPreparation:boolean}){
   if(!input.confirmedPreparation)throw new DomainValidationError("预检可能包含上传和填表，必须明确确认本次准备范围；这不是提交授权");
   const runtime=this.requireRuntime();const old=await this.status(input.projectId,input.packageId);
@@ -38,16 +41,18 @@ export class BrowserPublishPreparationService {
   try{const snapshot=await runtime.prepare(scope,videoPath);cp=await this.append(cp,scope,this.phase(scope,snapshot),snapshot.binding);return cp;}
   catch(error){await this.blocked(cp);throw error;}
  }
- async handoff(input:{projectId:string;packageId:string;confirmed:boolean}){
+ async handoff(input:{projectId:string;packageId:string;confirmed:boolean;scopeHash?:string;revision?:number;expectedAccountId?:string}){
   let cp=await this.status(input.projectId,input.packageId);
   if(!cp?.binding||!["WAITING_PLATFORM_VERIFICATION","READY_FOR_CONFIRMATION","RESTORED_WAITING_CONTINUE"].includes(cp.phase)||!input.confirmed)throw new DomainValidationError("需要当前等待状态和明确人工接管确认");
+  this.consent(cp,input);
   await this.current(cp);cp=await this.append(cp,cp.scope,"HANDOFF_PENDING",cp.binding);
   try{await this.requireRuntime().handoff(cp.binding!);return await this.append(cp,cp.scope,"WAITING_USER_CONTROL",cp.binding);}
   catch(error){await this.blocked(cp);throw error;}
  }
- async resume(input:{projectId:string;packageId:string;confirmedReturnControl:boolean}){
+ async resume(input:{projectId:string;packageId:string;confirmedReturnControl:boolean;scopeHash?:string;revision?:number;expectedAccountId?:string}){
   let cp=await this.status(input.projectId,input.packageId);
   if(!cp?.binding||cp.phase!=="WAITING_USER_CONTROL"||!input.confirmedReturnControl)throw new DomainValidationError("用户完成验证并明确归还控制后才能续接；归还不代表同意发布");
+  this.consent(cp,input);
   try{await this.current(cp);cp=await this.append(cp,cp.scope,"RESUMING",cp.binding);const snapshot=await this.requireRuntime().resume(cp.binding!);const phase=this.phase(cp.scope,snapshot,cp.binding);return await this.append(cp,cp.scope,phase==="READY_FOR_CONFIRMATION"?"RESTORED_WAITING_CONTINUE":phase,cp.binding);}
   catch(error){await this.blocked(cp);throw error;}
  }

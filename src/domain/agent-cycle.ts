@@ -13,6 +13,11 @@ export const agentCycleInputSchema = z.object({
 export type AgentCycleInput = z.infer<typeof agentCycleInputSchema>;
 export type AgentCycleStatus = "READY" | "RUNNING" | "WAITING_USER" | "WAITING_CONFIRMATION" | "BLOCKED" | "OUTCOME_UNKNOWN" | "COMPLETED" | "CANCELLED";
 export type CapabilityEffect = "READ" | "LOCAL" | "MODEL" | "EXTERNAL_WRITE" | "PAID_GENERATION" | "HUMAN_DECISION";
+/** Optional, process-local execution feedback. It never confers business permission. */
+export type LocalActionExecution = {
+  phase: "CONNECTING" | "CONNECTED" | "OBSERVING" | "CANCELLING" | "SUCCEEDED" | "CANCELLED" | "TIMED_OUT" | "FAILED";
+  version: number; samples: number; workerExited: boolean;
+};
 export type CycleEvidence = { stage: BusinessStage; kind: string; id: string; detail?: string };
 export type CapabilityResult = {
   status: "COMPLETE" | "PARTIAL" | "RUNNING" | "WAITING_USER" | "BLOCKED" | "OUTCOME_UNKNOWN";
@@ -27,6 +32,7 @@ export type CycleAction = {
   effect: CapabilityEffect; preview: string; proposedAt: string; confirmedAt?: string;
   startedAt?: string; completedAt?: string; result?: CapabilityResult; error?: string;
   resultObservationHash?: string;
+  localExecution?: LocalActionExecution;
 };
 export type AgentCycle = {
   id: string; projectId: string; input: AgentCycleInput; inputHash: string; revision: number;

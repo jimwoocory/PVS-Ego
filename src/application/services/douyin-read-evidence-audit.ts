@@ -35,6 +35,7 @@ export function auditDouyinReadPage(input:DouyinReadPageInput){
   const explicitParent=id(c.parent_cid);
   if(explicitParent!==undefined&&explicitParent!==relationExpected)issues.push("EXPLICIT_PARENT_CONFLICT");
   if(!normalized||normalized.cid!==cid||normalized.awemeId!==input.awemeId||normalized.parentCid!==(input.kind==="COMMENTS"?"":input.parentCid))issues.push("NORMALIZED_COMMENT_RELATION_MISMATCH");
+  if(typeof c.text!=="string"||c.text!==normalized?.text)issues.push("COMMENT_TEXT_NOT_PROVEN_OR_MISMATCH");
   const diggCount=counter(c.digg_count),replyCount=counter(c.reply_comment_total);
   if(diggCount.status==="OBSERVED"&&diggCount.value!==normalized?.diggCount||replyCount.status==="OBSERVED"&&replyCount.value!==normalized?.replyCount)issues.push("COMMENT_COUNTER_NORMALIZATION_MISMATCH");
   return {cid,awemeId:workId,rootParent:input.kind==="REPLIES"?input.parentCid:undefined,relationEvidence:rawRelationMatches?"RAW_REPLY_ID_MATCH":"REQUEST_SCOPE_ONLY_UNKNOWN",rawReplyId:rootParent,replyToReplyId:id(c.reply_to_reply_id),rawThreadRootId:id(c.root_comment_id),diggCount,replyCount};

@@ -5,10 +5,12 @@ import type { SmartGenerationRun } from "../domain/smart-generation.js";
 import type { ProductionQuote } from "../domain/generation-quote.js";
 import type {CanvasShortPreview} from "../domain/canvas-short-preview.js";
 import type {CanvasShortPlan} from "../domain/canvas-short-plan.js";
+import {renderOperationsOverview} from "./operations-evidence-ui.js";
+import type {OperationsOverview} from "../application/services/operations-evidence-reader.js";
 
 const escape=(text:unknown)=>String(text??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]!));
 const labels:Record<string,string>={READY:"准备继续",RUNNING:"后台处理中",WAITING_USER:"需要补充信息",WAITING_CONFIRMATION:"等待你确认具体动作",BLOCKED:"需要处理阻断",OUTCOME_UNKNOWN:"结果待核对，请勿重发",COMPLETED:"本轮目标已完成",CANCELLED:"已停止后续处理"};
-export function renderAgentCyclePage(input:{project?:{id:string;name:string};projects:Array<{id:string;name:string}>;cycles:AgentCycle[];skills:Array<{id:string;title:string}>;snapshot?:Record<string,unknown>}) {
+export function renderAgentCyclePage(input:{project?:{id:string;name:string};projects:Array<{id:string;name:string}>;cycles:AgentCycle[];skills:Array<{id:string;title:string}>;snapshot?:Record<string,unknown>;operationsReview?:OperationsOverview}) {
   const projectId=input.project?.id;
   return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent 全业务工作台 · 产品视频工作台</title><style>${pvsGlobalStyles}
   body{margin:0;font:15px/1.6 system-ui}main{max-width:1050px;margin:auto;padding:24px}section,article{background:white;border:1px solid #dce5f0;border-radius:12px;padding:20px;margin:16px 0}textarea{box-sizing:border-box;width:100%;min-height:95px;padding:12px}button{padding:10px 16px;border:1px solid #b8cbe5;border-radius:8px;background:#eaf2ff;cursor:pointer}button:disabled{opacity:.5}pre{white-space:pre-wrap;overflow-wrap:anywhere}.muted{color:#63758d}.message{padding:8px;border-bottom:1px solid #edf1f7}.error{color:#a31a20}.actions{display:flex;gap:12px;flex-wrap:wrap}.badge{font-weight:700}.review{background:#fff8e7;padding:15px;border-radius:8px}.stage{display:inline-block;background:#eef4fc;padding:3px 10px;border-radius:15px;margin:3px}</style>
@@ -16,6 +18,8 @@ export function renderAgentCyclePage(input:{project?:{id:string;name:string};pro
   <p>行业视频研究 → 策略创作 → 视频生产 → 发布与作品关联 → 数据和评论运营 → 复盘反馈下一轮</p>
   ${!projectId?`<section><h2>选择已有项目</h2>${input.projects.map(project=>`<p><a href="/projects/${encodeURIComponent(project.id)}/agent-cycle">${escape(project.name)} · 打开 Agent 工作台</a></p>`).join("")}<a href="/projects">新建或管理项目</a></section>`:`
   ${renderCheckpoint(input.snapshot)}
+  ${input.snapshot?.feedbackReadError||(input.snapshot?.operations as {insightReadError?:boolean}|undefined)?.insightReadError?'<p role="alert">部分保存反馈或复盘暂不可核验；已保留原记录，没有作为新输入使用。</p>':""}
+  ${renderOperationsOverview(projectId,input.operationsReview)}
   <section><h2>${input.cycles.some(c=>!["COMPLETED","CANCELLED"].includes(c.status))?"已有任务可在下方继续；新目标另开一轮":"这次想完成什么？"}</h2><form id="goal-form"><textarea id="goal" required minlength="3" maxlength="6000" placeholder="例如：研究这个行业的同类视频，结合产品资料制作一条广告；发布后收集指标和评论，复盘并形成下一轮创意。"></textarea><p class="muted">Agent在后台调用自有技能和业务工具，沿用当前已确认资料。付费生成、发布和回复前展示具体内容请你确认；价格未核实不会请求扣费。</p><button type="submit">开始新一轮 Agent 任务</button></form><p id="error" role="alert" class="error"></p></section>
   <section><h2>我们的业务技能</h2>${input.skills.map(skill=>`<span class="stage">${escape(skill.title)}</span>`).join("")}</section><div id="cycles">${input.cycles.map(renderCycle).join("")||"<p>暂无 Agent 任务。现有项目资料不会因打开本页而改变。</p>"}</div>
   <script>const projectId=${JSON.stringify(projectId)?.replace(/</g,"\\u003c")},base='/api/projects/'+encodeURIComponent(projectId)+'/agent-cycles';let busy=false,typing=false;
@@ -26,8 +30,8 @@ export function renderAgentCyclePage(input:{project?:{id:string;name:string};pro
   function goalRequestKey(goal){if(!goalRequest||goalRequest.goal!==goal){goalRequest={goal,requestKey:crypto.randomUUID()};try{sessionStorage.setItem(requestStorageKey,JSON.stringify(goalRequest));}catch{}}return goalRequest.requestKey;}
   document.querySelector('#goal-form').addEventListener('submit',async event=>{event.preventDefault();if(busy)return;busy=true;try{const goal=document.querySelector('#goal').value.trim();await post(base,{goal,requestKey:goalRequestKey(goal)});location.reload();}catch(error){document.querySelector('#error').textContent=error.message;}finally{busy=false;}});
   document.addEventListener('focusin',event=>{if(event.target.matches('textarea'))typing=true;});document.addEventListener('focusout',()=>typing=false);
-  document.addEventListener('click',async event=>{const button=event.target.closest('button[data-action]');if(!button||busy)return;const card=button.closest('[data-cycle]'),id=card.dataset.cycle,revision=Number(card.dataset.revision),action=button.dataset.action;let payload={expectedRevision:revision};if(action==='confirm'){payload={...payload,actionId:button.dataset.actionId,inputHash:button.dataset.hash};if(!confirm('确认执行上方展示的这一项具体动作？授权不覆盖其他发布、回复或新的生成。'))return;}if(action==='reply'){payload.text=card.querySelector('textarea').value;if(!payload.text.trim())return;}if(action==='advance')payload={};busy=true;button.disabled=true;try{await post(base+'/'+encodeURIComponent(id)+'/'+action,payload);location.reload();}catch(error){card.querySelector('[role=alert]').textContent=error.message;}finally{busy=false;button.disabled=false;}});
-  setInterval(async()=>{if(busy||typing)return;try{const r=await fetch(base);if(!r.ok)return;const data=await r.json();const versions=Array.from(document.querySelectorAll('[data-cycle]')).map(n=>n.dataset.cycle+':'+n.dataset.revision).join('|');const current=data.result.map(n=>n.id+':'+n.revision).join('|');if(versions!==current)location.reload();}catch{}},5000);
+  document.addEventListener('click',async event=>{const button=event.target.closest('button[data-action]');if(!button||busy)return;const card=button.closest('[data-cycle]'),id=card.dataset.cycle,revision=Number(card.dataset.revision),action=button.dataset.action;let payload={expectedRevision:revision};if(action==='confirm'){payload={...payload,actionId:button.dataset.actionId,inputHash:button.dataset.hash};if(!confirm('确认执行上方展示的这一项具体动作？授权不覆盖其他发布、回复或新的生成。'))return;}if(action==='reply'){payload.text=card.querySelector('textarea').value;if(!payload.text.trim())return;}if(action==='advance'){button.disabled=true;void post(base+'/'+encodeURIComponent(id)+'/'+action,{}).then(()=>location.reload()).catch(error=>{card.querySelector('[role=alert]').textContent=error.message;button.disabled=false;});return;}busy=true;button.disabled=true;try{await post(base+'/'+encodeURIComponent(id)+'/'+action,payload);location.reload();}catch(error){card.querySelector('[role=alert]').textContent=error.message;}finally{busy=false;button.disabled=false;}});
+  setInterval(async()=>{if(busy||typing)return;try{const r=await fetch(base);if(!r.ok)return;const data=await r.json();const versions=Array.from(document.querySelectorAll('[data-cycle]')).map(n=>n.dataset.cycle+':'+n.dataset.revision+':'+n.dataset.executionVersion).join('|');const current=data.result.map(n=>n.id+':'+n.revision+':'+(n.actions.at(-1)?.localExecution?.version??0)).join('|');if(versions!==current)location.reload();}catch{}},1000);
   </script>`}
   </main></html>`;
 }
@@ -50,7 +54,7 @@ function renderCheckpoint(snapshot?:Record<string,unknown>) {
   const final=snapshot.final as {status?:string;id?:string}|null;
   const publication=snapshot.publication as {packages?:Array<{id:string;finalAssemblyId:string}>;receipts?:Array<{packageId:string;trusted:boolean;kind:string}>}|undefined;
   const published=publication?.receipts?.some(r=>r.trusted&&r.kind==="PUBLISHED_CONFIRMED"&&publication.packages?.some(p=>p.id===r.packageId&&p.finalAssemblyId===final?.id));
-  const production=shortDelivered?"15秒成片已确认并可下载，原60秒任务单独保留":run?.status==="READY_FOR_ASSET_PAID_CONFIRM"?"待核实角色与场景费用，未生成":final?.status==="ACCEPTED"?"成片已审阅":run?"沿原任务推进中":"已有脚本与分镜，待接入执行任务";
+  const production=shortDelivered?"15秒成片已确认并可下载，原60秒任务单独保留":run?.status==="READY_FOR_ASSET_PAID_CONFIRM"?"待核实角色与场景费用，未生成":final?.status==="ACCEPTED"?"成片已审阅":run?"沿原任务推进中":w.script&&w.productionPlan?"已有脚本与分镜，待接入执行任务":w.script?"已有脚本，分镜尚未准备":"脚本与分镜尚未准备";
   const observation = (snapshot.operations as {binding?:{source?:string;awemeId?:string;workDescription?:string}}|undefined)?.binding;
   const historical = observation?.source === "HISTORICAL_WORK";
   const stages=[ ["行业视频搜索与分析",`${candidates.length}条已保存候选，${analyzed}条已分析`],
@@ -140,17 +144,21 @@ export function renderCanvasShortPlan(p?:CanvasShortPlan):string{
 function renderCycle(cycle:AgentCycle) {
   const pending=cycle.actions.find(action=>action.status==="PROPOSED");
   const last=cycle.actions.at(-1);
+  const execution=last?.localExecution;
+  const executionLabels:Record<string,string>={CONNECTING:"正在连接本机执行器",CONNECTED:"本机执行器已连接",OBSERVING:"正在观察本机页面",CANCELLING:"正在取消，等待工作进程退出",SUCCEEDED:"本机只读动作已完成",CANCELLED:"本机只读动作已取消",TIMED_OUT:"本机只读动作已超时",FAILED:"本机只读动作失败，需检查回执"};
+  const localRunning=cycle.status==="RUNNING"&&Boolean(execution);
   const readiness=last?.capabilityId==="production.readiness"&&last.result?.data&&typeof last.result.data==="object"
     ?last.result.data as {providerReady?:boolean;costStatus?:string;items?:unknown[]}:undefined;
   const lastUser=cycle.messages.map(m=>m.role).lastIndexOf("user");
   const updates=cycle.messages.slice(lastUser+1).filter(m=>m.role!=="user");
   const recent=updates.filter((m,i)=>!updates.slice(i+1).some(other=>other.text===m.text)).slice(-3);
-  return `<article data-cycle="${escape(cycle.id)}" data-revision="${cycle.revision}"><h2>当前业务任务</h2><p class="badge">${labels[cycle.status]??escape(cycle.status)}</p><details><summary>查看本轮目标</summary><p>${escape(cycle.input.goal)}</p></details>
+  return `<article data-cycle="${escape(cycle.id)}" data-revision="${cycle.revision}" data-execution-version="${execution?.version??0}"><h2>当前业务任务</h2><p class="badge">${labels[cycle.status]??escape(cycle.status)}</p><details><summary>查看本轮目标</summary><p>${escape(cycle.input.goal)}</p></details>
+  ${execution?`<div role="status" aria-label="本机执行状态"><b>${executionLabels[execution.phase]??escape(execution.phase)}</b><p>已收到 ${execution.samples} 次页面观察。${execution.workerExited?"工作进程退出已确认。":"尚未确认工作进程退出。"}取消仅停止本机动作和后续调度。</p></div>`:""}
   ${readiness&&cycle.status==="BLOCKED"?`<div class="review" role="status"><h3>当前暂停原因</h3><p>${readiness.providerReady?"后台生成通道检查已通过。":"后台生成前检查仍有未满足条件，可能涉及预算或素材依赖，详细原因已保留在诊断回执。"}</p><p>${readiness.costStatus==="UNKNOWN"?`本次${readiness.items?.length??0}项生成范围尚未取得完整、有效的后台积分报价，暂不能进入费用确认。`:"生成前检查仍有未满足项。"}原任务、脚本和素材规划已保留，没有提交生成或发布。</p><p>无需反复确认创意或改用外部网页。后台问题解决后从这条原任务继续，付费生成和发布仍需分别请你确认。</p></div>`:""}
   ${recent.map(message=>`<div class="message"><b>${message.role==="agent"?"最近进展":"执行记录"}</b>：${escape(message.text)}</div>`).join("")}
   ${pending?`<div class="review"><h3>下一项具体动作</h3><pre>${escape(pending.preview)}</pre>${cycle.status==="WAITING_CONFIRMATION"?`<button data-action="confirm" data-action-id="${escape(pending.id)}" data-hash="${escape(pending.inputHash)}">确认这一项动作</button>`:""}</div>`:""}
   ${last?.result?.resumeHref?`<p><a href="${escape(last.result.resumeHref)}">查看实际结果或处理业务审核</a></p>`:""}
   ${["WAITING_USER","BLOCKED","WAITING_CONFIRMATION","OUTCOME_UNKNOWN"].includes(cycle.status)?'<p><textarea placeholder="补充要求，或说明在业务页面核对和处理后的结果"></textarea></p><button data-action="reply">补充后继续原任务</button>':""}
-  <p class="actions">${["READY","RUNNING"].includes(cycle.status)?'<button data-action="advance">检查并继续一步</button>':""}${!["CANCELLED","COMPLETED"].includes(cycle.status)?'<button data-action="cancel">停止后续处理</button>':""}</p><p role="alert" class="error"></p>
+  <p class="actions">${["READY","RUNNING"].includes(cycle.status)&&!localRunning?'<button data-action="advance">检查并继续一步</button>':""}${!["CANCELLED","COMPLETED"].includes(cycle.status)?`<button data-action="cancel" ${execution?.phase==="CANCELLING"?"disabled":""}>${localRunning?"取消本机只读动作":"停止后续处理"}</button>`:""}</p><p role="alert" class="error"></p>
   <details><summary>历史记录与工具诊断</summary><pre>${escape(JSON.stringify({cycleId:cycle.id,steps:cycle.steps,messages:cycle.messages,skills:cycle.loadedSkills,actions:cycle.actions,evidence:cycle.evidence},null,2))}</pre></details></article>`;
 }

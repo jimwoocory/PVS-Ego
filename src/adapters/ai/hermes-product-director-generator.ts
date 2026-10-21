@@ -13,6 +13,7 @@ import {
 import { hashValue } from "../../domain/hashing.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import { referenceVideoProfileForPrompt, REFERENCE_VIDEO_EVIDENCE_INSTRUCTIONS, assertReferenceVideoInputBinding } from "../../application/services/reference-video-analysis.js";
+import { referenceVideoEvidenceRuntime, type ReferenceVideoEvidenceVerifier } from "../../application/services/reference-video-evidence.js";
 import {referenceSetRef,assertReferenceBinding} from "../../application/services/creative-reference-binding.js";
 import {
   directorClipBounds,
@@ -504,9 +505,10 @@ export class HermesProductDirectorGenerator implements ProductDirectorGenerator 
   readonly id = "hermes-product-director";
   readonly version = "p0-v1";
 
-  constructor(private readonly runtime: StructuredAiRuntime) {}
+  constructor(private readonly runtime: StructuredAiRuntime, private readonly verifyReferenceVideo?: ReferenceVideoEvidenceVerifier) {}
 
   async generate(input: ProductDirectorInput): Promise<ProductionPlan> {
+    input={...input,referenceVideoProfile:input.referenceVideoProfile?structuredClone(input.referenceVideoProfile):input.referenceVideoProfile};
     assertReferenceVideoInputBinding(input.referenceVideoProfile,input.productTruth.projectId,[input.creativeBatch.referenceVideoProfileRef,input.script.referenceVideoProfileRef]);
     assertReferenceBinding(input.script.creativeReferenceSetRef,input.creativeContext?.references,input.productTruth);
     assertReferenceBinding(input.creativeBatch.creativeReferenceSetRef,input.creativeContext?.references,input.productTruth);
@@ -525,7 +527,7 @@ export class HermesProductDirectorGenerator implements ProductDirectorGenerator 
       ...input.productTruth.sellingPoints
     ].map((fact) => ({ id: fact.id, statement: fact.statement }));
 
-    const generation = await generateStructuredJson(this.runtime, {
+    const generation = await generateStructuredJson(referenceVideoEvidenceRuntime(this.runtime,input.referenceVideoProfile,input.productTruth.projectId,this.verifyReferenceVideo), {
       task:
         "Generate a Product Director ProductionPlan draft with Scene -> Clip -> Segment structure.",
       instructions: [

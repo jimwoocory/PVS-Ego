@@ -750,6 +750,8 @@ export class ResearchService {
   async startRun(input: {
     projectId: string;
     mode: ResearchMode;
+    /** Evidence collection only; this reduces work and never authorizes a model call. */
+    collectOnly?: boolean;
     goal: string;
     // Research may precede ProductTruth review; use saved user-entered identity
     // as discovery keywords only, never as confirmed product claims.
@@ -774,6 +776,7 @@ export class ResearchService {
     if (!project) throw new DomainValidationError("项目不存在");
 
     const mode = input.mode;
+    if(input.collectOnly && mode!=="BASIC")throw new DomainValidationError("仅收集证据只支持指定来源的基础研究，不运行搜索或模型");
     let sourceUrls = input.sourceUrls.map(validateSourceUrl);
     const goal = input.goal.trim();
     const workspace = await this.productFlow.getWorkspace(input.projectId);
@@ -844,6 +847,7 @@ export class ResearchService {
       goal,
       sourceUrls,
       queries,
+      ...(input.collectOnly?{browserState:{provider:'collection-only',lastCheckedAt:now,collectionOnly:true}}:{}),
       createdAt: now,
       updatedAt: now
     });
@@ -1147,8 +1151,12 @@ export class ResearchService {
       });
     }
 
+    if(input.collectOnly && evidence.length && !browserBlocked){
+      run=await this.repo.updateRun(run.id,{status:"BLOCKED",blockerCode:"BRIEF_GENERATION_NOT_AUTHORIZED",blockerMessage:"指定来源证据已保存，未调用模型生成研究摘要",requiredUserAction:"核对原证据；摘要生成需要另行确认模型与费用，不自动继续"});
+      return {run,evidence};
+    }
     let brief: ResearchBrief | undefined;
-    if (evidence.length) {
+    if (evidence.length && !input.collectOnly) {
       brief = await this.generateBrief(
         run,
         evidence,
@@ -1210,6 +1218,31 @@ export class ResearchService {
       evidence,
       ...(brief ? { brief } : {})
     };
+  }
+
+  /** Explicit source-only continuation. It cannot discover, analyze media,
+   * generate a brief, change sources or convert an existing run into this mode. */
+  async resumeCollectionOnly(projectId:string,runId:string):Promise<{run:ResearchRun;evidence:ResearchEvidence[]}>{
+    let run=await this.repo.findRun(runId);
+    if(!run||run.projectId!==projectId||run.mode!=='BASIC'||run.status!=='BLOCKED'||run.browserState?.collectionOnly!==true||!['BROWSER_PROVIDER_ERROR','BROWSER_SESSION_EXPIRED','LOGIN_REQUIRED','CAPTCHA_REQUIRED','RISK_CONTROL'].includes(run.blockerCode??''))throw new DomainValidationError('当前研究不允许仅采集续接');
+    let evidence=await this.repo.listEvidence(runId);
+    for(const source of run.sourceUrls){
+      if(evidence.some(e=>e.status==='ACTIVE'&&e.sourceUrl===source.url))continue;
+      try{
+        const doc=await this.webProvider.fetchSource({...source,...(run.browserState.resumeToken?{browserResumeHandle:run.browserState.resumeToken}:{})},{projectId,runId});
+        const id='rce-'+hashValue({projectId,runId,sourceUrl:doc.finalUrl,contentHash:doc.contentHash});
+        try{await this.repo.createEvidence({id,projectId,runId,sourceUrl:doc.finalUrl,title:doc.title,fetchedAt:doc.fetchedAt,sourceType:source.sourceType,excerpt:doc.excerpt,summary:evidenceSummary(doc.text),contentHash:doc.contentHash,...(doc.sourceCapture?{sourceCapture:doc.sourceCapture}:{}),confidence:confidenceForSource(source.sourceType),relatedClaims:[],status:'ACTIVE',createdAt:new Date().toISOString()});}
+        catch(error){if(!(await this.repo.listEvidence(runId)).some(e=>e.id===id&&e.contentHash===doc.contentHash&&e.sourceUrl===doc.finalUrl))throw error;}
+        evidence=await this.repo.listEvidence(runId);
+      }catch(error){
+        if(!(error instanceof BrowserResearchBlockedError))throw error;
+        const result=error.result;
+        run=await this.repo.updateRun(runId,{status:'BLOCKED',blockerCode:result.blockerCode,blockerMessage:result.message,requiredUserAction:result.requiredUserAction,browserState:{...run.browserState,...result.browserState,collectionOnly:true,lastCheckedAt:new Date().toISOString()}});
+        return {run,evidence};
+      }
+    }
+    run=await this.repo.updateRun(runId,{status:'BLOCKED',blockerCode:'BRIEF_GENERATION_NOT_AUTHORIZED',blockerMessage:'指定来源证据已保存，未调用模型生成研究摘要',requiredUserAction:'核对原证据；摘要生成需要另行确认模型与费用，不自动继续'});
+    return {run,evidence};
   }
 
   async resumeRun(projectId: string, runId: string): Promise<{

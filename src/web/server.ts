@@ -113,6 +113,10 @@ import {
   referenceVideoBrowserPreviewRelativePath
 } from "../application/services/reference-video-analysis.js";
 import { ResearchService } from "../application/services/research-service.js";
+import { ResearchEvidenceReader } from "../application/services/research-evidence-reader.js";
+import { handleResearchEvidenceHttp } from "./research-evidence-http.js";
+import {OperationsEvidenceReader} from "../application/services/operations-evidence-reader.js";
+import {handleOperationsEvidenceHttp} from "./operations-evidence-http.js";
 import type { MarketVideoSearchProvider } from "../application/ports/market-video-provider.js";
 import { TaskCenterService } from "../application/services/task-center-service.js";
 import { SystemHealthService } from "../application/services/system-health-service.js";
@@ -221,6 +225,8 @@ export type WebDependencies = {
   visualEditAssessment?: VisualEditAssessmentService;
   referenceVideo: ReferenceVideoAnalysisService;
   research: ResearchService;
+  researchEvidence?: ResearchEvidenceReader;
+  operationsEvidence?:OperationsEvidenceReader;
   douyinResearchAuth?: DouyinResearchAuthLauncher;
   douyinMarketVideoSearch?: MarketVideoSearchProvider;
   taskCenter: TaskCenterService;
@@ -404,6 +410,7 @@ export function createDefaultDependencies(): WebDependencies {
       projectsRoot
     }
   );
+  const researchEvidence = new ResearchEvidenceReader(researchRepo,artifacts,projectsRoot);
   const douyinResearchAuth = deniedPort<WindowsDouyinResearchAuthLauncher>("BROWSER_AUTH");
   const generationConfig = loadGenerationConfig();
   const dreaminaCapability = new DreaminaAgentCapabilityService(provider);
@@ -621,9 +628,11 @@ export function createDefaultDependencies(): WebDependencies {
     (projectId) =>
       douyinCreativeFeedbackService.context(
         projectId
-      )
+      ),
+    (profile,projectId)=>referenceVideo.assertCurrentEvidence(profile,projectId)
   );
-  const productDirector = new ProductDirectorService(new HermesProductDirectorGenerator(aiRuntime), aiRuntime,creativeReferences);
+  const verifyReferenceVideo=(profile:Parameters<ReferenceVideoAnalysisService["assertCurrentEvidence"]>[0],projectId:string)=>referenceVideo.assertCurrentEvidence(profile,projectId);
+  const productDirector = new ProductDirectorService(new HermesProductDirectorGenerator(aiRuntime,verifyReferenceVideo), aiRuntime,creativeReferences,verifyReferenceVideo);
   const scriptFeasibility = new ScriptFeasibilityService(aiRuntime);
   const v8Screenplay = new V8DetailedScreenplayService(aiRuntime);
   const directorV3Planner = new DirectorV3PlannerService();
@@ -686,6 +695,7 @@ export function createDefaultDependencies(): WebDependencies {
     agentCycles,
     douyinCollection,
     douyinSchedules,
+    operationsEvidence:new OperationsEvidenceReader(new PrismaDouyinOperationsScheduleRepository(prisma),new PrismaDouyinCollectionRepository(prisma),douyinOpsRepo,productFlowRepo,artifacts,projectsRoot),
     creativeReferences,
     visualEditAssessment,
     collectCreativeReferences:(projectId)=>collectResearchReferences(projectId,research,productFlow,researchMediaAnalyzer),
@@ -702,6 +712,7 @@ export function createDefaultDependencies(): WebDependencies {
     referenceVideo,
     research,
     douyinResearchAuth,
+    researchEvidence,
     douyinMarketVideoSearch,
     taskCenter,
     health,
@@ -1039,6 +1050,8 @@ export function createAppServer(
     installChineseResponse(res);
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
+      if (await handleResearchEvidenceHttp(req,res,url,deps)) return;
+      if (await handleOperationsEvidenceHttp(req,res,url,deps)) return;
       if (await handleAgentCycleHttp(req,res,url,deps)) return;
       if (await handleCreativeReferenceHttp(req,res,url,deps)) return;
       if (await handleSmartGenerationHttp(req, res, url, { ...deps, smartWorkerPolicy })) return;
@@ -3757,14 +3770,20 @@ export function createAppServer(
 
       const browserPreparationMatch=url.pathname.match(/^\/api\/projects\/([^/]+)\/publish\/packages\/([^/]+)\/browser-preflight(?:\/(prepare|handoff|resume))?$/);
       if(browserPreparationMatch&&(req.method==="GET"||req.method==="POST")){
+       try{
         const projectId=browserPreparationMatch[1]!,packageId=browserPreparationMatch[2]!,action=browserPreparationMatch[3];
         const service=deps.publishBridge.browserPreparation;
         if(!service)throw new DomainValidationError("分阶段浏览器发布未配置，停止，不自动使用组合发布");
         if(req.method==="GET"&&!action)return json(res,200,{checkpoint:await service.status(projectId,packageId),supported:deps.publishBridge.browserPreparationSupported});
-        const body=await readJson(req) as {confirmedPreparation?:unknown;expectedAccountId?:unknown;confirmed?:unknown;confirmedReturnControl?:unknown};
-        const checkpoint=action==="prepare"?await service.prepare({projectId,packageId,expectedAccountId:requireString(body.expectedAccountId,"expectedAccountId"),confirmedPreparation:body.confirmedPreparation===true}):action==="handoff"?await service.handoff({projectId,packageId,confirmed:body.confirmed===true}):action==="resume"?await service.resume({projectId,packageId,confirmedReturnControl:body.confirmedReturnControl===true}):null;
+        const body=await readJson(req) as {confirmedPreparation?:unknown;expectedAccountId?:unknown;confirmed?:unknown;confirmedReturnControl?:unknown;scopeHash?:unknown;revision?:unknown};
+        const consent={expectedAccountId:typeof body.expectedAccountId==='string'?body.expectedAccountId:undefined,scopeHash:typeof body.scopeHash==='string'?body.scopeHash:undefined,revision:typeof body.revision==='number'?body.revision:undefined};
+        const checkpoint=action==="prepare"?await service.prepare({projectId,packageId,expectedAccountId:requireString(body.expectedAccountId,"expectedAccountId"),confirmedPreparation:body.confirmedPreparation===true}):action==="handoff"?await service.handoff({projectId,packageId,confirmed:body.confirmed===true,...consent}):action==="resume"?await service.resume({projectId,packageId,confirmedReturnControl:body.confirmedReturnControl===true,...consent}):null;
         if(!checkpoint)throw new DomainValidationError("未知发布预检操作");
         return json(res,200,{checkpoint});
+       }catch(error){
+        if(error instanceof Error&&error.message==='BROWSER_CHECKPOINT_INTEGRITY_FAILED')throw new DomainValidationError('原发布检查点完整性无法核验，已停止。请检查原记录，不重新上传或提交。');
+        throw error;
+       }
       }
 
       const publishPackageDirectMatch = url.pathname.match(

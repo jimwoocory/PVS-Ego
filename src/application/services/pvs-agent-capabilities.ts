@@ -494,6 +494,10 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
       run: async c => this.d.schedules ? answer("本项目运营观察计划", await this.d.schedules.list(c.projectId)) : answer("当前未配置运营计划服务", undefined, [], "BLOCKED") });
     this.add({ id: "operations.schedule-pause", title: "暂停原运营观察计划", description: "按原项目、计划和确切版本暂停后续观察，不删除已有数据。", stage: "OPERATIONS", effect: "LOCAL", inputSchema: z.object({ scheduleId: id, expectedRevision: z.number().int().positive() }).strict(),
       run: async (c, i) => this.d.schedules ? answer("运营观察计划已暂停", await this.d.schedules.pause(c.projectId, i.scheduleId, i.expectedRevision)) : answer("当前未配置运营计划服务", undefined, [], "BLOCKED") });
+    this.add({id:"operations.schedule-resume",title:"确认续接原运营观察计划",description:"核对当前版本、原范围哈希与实际账号后续接；不扩展次数、时间窗或解除未知读取结果。",stage:"OPERATIONS",effect:"HUMAN_DECISION",
+      inputSchema:z.object({scheduleId:id,expectedRevision:z.number().int().positive(),inputHash:hash,expectedAccountId:id}).strict(),
+      preview:async(p,i)=>{const run=await this.d.schedules?.get(p,i.scheduleId);if(!run||run.revision!==i.expectedRevision||run.inputHash!==i.inputHash||run.input.opsAccountUid!==i.expectedAccountId)throw new DomainValidationError("原计划版本或账号已变化");return `续接原计划 ${run.id}；账号 ${i.expectedAccountId}；作品 ${run.input.awemeId}；最多 ${run.input.maxCaptures} 次，已完成 ${run.completedCaptures} 次。保留原游标、时间窗和未知结果，不自动重读。`;},
+      run:async(c,i)=>this.d.schedules?answer("已保存原范围续接；不代表采集完成",await this.d.schedules.resume({projectId:c.projectId,id:i.scheduleId,expectedRevision:i.expectedRevision,inputHash:i.inputHash,expectedAccountId:i.expectedAccountId,confirmed:c.confirmed===true}),[],"PARTIAL"):answer("当前未配置运营计划服务",undefined,[],"BLOCKED")});
     this.add({ id: "operations.inspect", title: "查看已保存运营数据", description: "只读作品绑定、指标、评论和草稿，不访问平台。", stage: "OPERATIONS", effect: "READ", inputSchema: empty,
       run: async c => answer("本地运营数据", (await this.snapshot(c.projectId)).operations) });
     this.add({ id: "operations.metrics", title: "采集已绑定作品指标", description: "从实际平台读取当前指标并保存快照，不生成历史缺失指标。", stage: "OPERATIONS", effect: "READ", inputSchema: empty,
@@ -569,17 +573,18 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
 
   async snapshot(projectId: string): Promise<Record<string, unknown>> {
     const w = await this.workspace(projectId);
+    let feedbackReadError=false,insightReadError=false,scheduleReadError=false,artifactReadError=false;
     const [research, runs, final, preference, packages, receipts, binding, artifacts, feedback] = await Promise.all([
       this.d.research.pageData(projectId), this.d.smartGeneration.list(projectId), this.d.finalOutput.latestAssembly(projectId), this.d.publishRepo.getPreference(projectId),
       this.d.publishRepo.listPackages(projectId), this.d.publishRepo.listReceipts(projectId), this.d.opsRepo.latestWorkBinding(projectId, { preferBound: true }),
-      this.d.artifacts.listByProject(projectId), this.d.feedback.context(projectId)
+      this.d.artifacts.listByProject(projectId).catch(()=>{artifactReadError=true;return [];}), this.d.feedback.context(projectId).catch(()=>{feedbackReadError=true;return [];})
     ]);
     const [snapshots, comments, drafts, insight] = binding?.awemeId ? await Promise.all([
       this.d.opsRepo.listMetricSnapshots({ projectId, awemeId: binding.awemeId, limit: 30 }), this.d.opsRepo.listComments({ projectId, awemeId: binding.awemeId, limit: 50, order: "desc" }),
-      this.d.opsRepo.listLatestReplyDrafts({ projectId, awemeId: binding.awemeId }), this.d.opsRepo.latestInsight(projectId, binding.awemeId)
+      this.d.opsRepo.listLatestReplyDrafts({ projectId, awemeId: binding.awemeId }), this.d.opsRepo.latestInsight(projectId, binding.awemeId).catch(()=>{insightReadError=true;return null;})
     ]) : [[], [], [], null] as const;
     const collections = this.d.collections ? await this.d.collections.list(projectId) : [];
-    const schedules = this.d.schedules ? await this.d.schedules.list(projectId) : [];
+    const schedules = this.d.schedules ? await this.d.schedules.list(projectId).catch(()=>{scheduleReadError=true;return [];}) : [];
     // The short comment preview must not hide older parents with unread replies.
     const savedParents = binding?.awemeId ? await this.d.opsRepo.listComments({ projectId, awemeId: binding.awemeId,
       parentCid: null, limit: 1000, order: "desc" }) : [];
@@ -600,8 +605,8 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
         finalAssemblyId: p.finalAssemblyId, finalArtifactId: p.finalArtifactId, finalArtifactHash: p.finalArtifactHash })), receipts },
       operations: { binding, replyParents: savedParents.filter(c => (c.replyCount===undefined||c.replyCount > 0)).map(c => ({ cid: c.cid, replyCount: c.replyCount })),
         replyParentIndex: { savedTopLevelCount: savedParents.length, limit: 1000, truncated: savedParents.length === 1000 },
-        snapshots, collections, schedules, comments: comments.map(c => ({ id: c.id, cid: c.cid, parentCid: c.parentCid, text: c.text, replyCount: c.replyCount, category: c.category, contentHash: c.contentHash })), drafts, insight },
-      feedback, evidenceArtifacts: artifacts.filter(a => a.relativePath.startsWith("agent-evidence/")).map(a => ({ id: a.id, sha256: a.sha256, integrityStatus: a.integrityStatus })) };
+        snapshots, collections, schedules,scheduleReadError,insightReadError, comments: comments.map(c => ({ id: c.id, cid: c.cid, parentCid: c.parentCid, text: c.text, replyCount: c.replyCount, category: c.category, contentHash: c.contentHash })), drafts, insight },
+      feedback,feedbackReadError,artifactReadError, evidenceArtifacts: artifacts.filter(a => a.relativePath.startsWith("agent-evidence/")).map(a => ({ id: a.id, sha256: a.sha256, integrityStatus: a.integrityStatus })) };
   }
   async fingerprint(projectId: string, capabilityId?: string, input?: Record<string, unknown>) {
     // Authorization depends on business versions, not independent observations.

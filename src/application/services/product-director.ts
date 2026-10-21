@@ -19,6 +19,8 @@ import { UsageComplianceService } from "./usage-compliance.js";
 import { assertDirectorPlanTarget } from "./director-generation-target.js";
 import { assertV8DirectorConformance } from "./v8-director-conformance.js";
 import {assertReferenceBinding, referenceSetRef, type CreativeReferenceGuard} from "./creative-reference-binding.js";
+import {assertCurrentReferenceVideoEvidence,referenceVideoEvidenceRuntime,type ReferenceVideoEvidenceVerifier} from "./reference-video-evidence.js";
+import {assertReferenceVideoInputBinding} from "./reference-video-analysis.js";
 
 function assertSameRef(
   actual: { entityType: string; entityId: string; version: number; hash: string },
@@ -62,8 +64,9 @@ export class ProductDirectorService {
 
   constructor(
     private readonly generator: ProductDirectorGenerator,
-    usageComplianceRuntime?: StructuredAiRuntime,
-    private readonly references?: CreativeReferenceGuard
+    private readonly usageComplianceRuntime?: StructuredAiRuntime,
+    private readonly references?: CreativeReferenceGuard,
+    private readonly verifyReferenceVideo?: ReferenceVideoEvidenceVerifier
   ) {
     this.usageCompliance = usageComplianceRuntime
       ? new UsageComplianceService(usageComplianceRuntime)
@@ -79,9 +82,11 @@ export class ProductDirectorService {
   }
 
   async generate(inputRaw: ProductDirectorInput): Promise<ProductionPlan> {
+    inputRaw={...inputRaw,referenceVideoProfile:inputRaw.referenceVideoProfile?structuredClone(inputRaw.referenceVideoProfile):inputRaw.referenceVideoProfile};
     const productTruth = productTruthSchema.parse(inputRaw.productTruth);
     const creativeBatch = creativeBatchSchema.parse(inputRaw.creativeBatch);
     const script = scriptDraftSchema.parse(inputRaw.script);
+    assertReferenceVideoInputBinding(inputRaw.referenceVideoProfile,productTruth.projectId,[creativeBatch.referenceVideoProfileRef,script.referenceVideoProfileRef]);
     const references=this.references ? await this.references.assertExpected(productTruth.projectId,script.creativeReferenceSetRef) : inputRaw.creativeContext?.references;
     assertReferenceBinding(script.creativeReferenceSetRef,references,productTruth);
     assertReferenceBinding(creativeBatch.creativeReferenceSetRef,references,productTruth);
@@ -122,6 +127,7 @@ export class ProductDirectorService {
       "CreativeBatch"
     );
 
+    await assertCurrentReferenceVideoEvidence(inputRaw.referenceVideoProfile,productTruth.projectId,this.verifyReferenceVideo);
     const generated = productionPlanSchema.parse(
       await this.generator.generate({
         ...inputRaw,
@@ -134,6 +140,8 @@ export class ProductDirectorService {
     if (generated.projectId !== productTruth.projectId) {
       throw new DomainValidationError("生成的导演方案与当前项目不匹配");
     }
+    assertReferenceVideoInputBinding(inputRaw.referenceVideoProfile,productTruth.projectId,[generated.referenceVideoProfileRef]);
+    if(inputRaw.referenceVideoProfile&&!generated.referenceVideoProfileRef)throw new DomainValidationError("导演方案缺少本次参考视频版本引用");
     assertSameRef(generated.productTruthRef, script.productTruthRef, "ProductionPlan ProductTruth");
     assertSameRef(
       generated.scriptRef,
@@ -182,7 +190,8 @@ export class ProductDirectorService {
       );
     }
 
-    await this.assertPlanUsageCompliance(productTruth, generated);
+    if(this.usageComplianceRuntime)await new UsageComplianceService(referenceVideoEvidenceRuntime(this.usageComplianceRuntime,inputRaw.referenceVideoProfile,productTruth.projectId,this.verifyReferenceVideo)).assertPlan(productTruth,generated);
+    await assertCurrentReferenceVideoEvidence(inputRaw.referenceVideoProfile,productTruth.projectId,this.verifyReferenceVideo);
 
     return generated;
   }

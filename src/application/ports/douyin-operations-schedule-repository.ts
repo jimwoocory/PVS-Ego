@@ -9,4 +9,7 @@ export interface DouyinOperationsScheduleRepository {
   save(run: DouyinOperationsSchedule, owner: string, until: string): Promise<DouyinOperationsSchedule>;
   pause(projectId: string, id: string, expectedRevision: number, now: string): Promise<DouyinOperationsSchedule | null>;
   release(projectId: string, id: string, owner: string): Promise<void>;
+  assertLease?(projectId:string,id:string,revision:number,owner:string,now:string):Promise<void>;
+  resume?(projectId:string,id:string,revision:number,inputHash:string,now:string):Promise<DouyinOperationsSchedule|null>;
+  inspectLease?(projectId:string,id:string,now:string):Promise<{revision:number;state:"ACTIVE"|"EXPIRED"|"FREE";expiresAt?:string;checkedAt:string}|null>;
 }

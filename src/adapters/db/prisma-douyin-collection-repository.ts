@@ -31,6 +31,23 @@ export class PrismaDouyinCollectionRepository implements DouyinCollectionReposit
     return rows[0] ? parse(rows[0]) : null;
   }
 
+  async findByRequestKey(projectId:string,requestKey:string){
+    const rows=await this.db.$queryRaw<Row[]>`SELECT "runJson" FROM "DouyinCollectionRunRecord" WHERE "projectId"=${projectId} AND "requestKey"=${requestKey}`;
+    return rows[0]?parse(rows[0]):null;
+  }
+
+  async resumeAfterHuman(projectId:string,id:string,revision:number,now:string){
+    return this.db.$transaction(async tx=>{
+      const rows=await tx.$queryRaw<Row[]>`SELECT "runJson" FROM "DouyinCollectionRunRecord" WHERE "projectId"=${projectId} AND "id"=${id}`;
+      if(!rows[0])return null;
+      const old=parse(rows[0]);
+      if(old.revision!==revision||old.status!=="BLOCKED"||!["AUTH_REQUIRED","RISK_CONTROL"].includes(old.errorCode??""))return null;
+      const run=douyinCollectionRunSchema.parse({...old,status:old.pages?"PARTIAL":"QUEUED",retryable:true,errorCode:undefined,errorMessage:undefined,revision:old.revision+1,leaseExpiresAt:undefined,updatedAt:now});
+      const n=await tx.$executeRaw`UPDATE "DouyinCollectionRunRecord" SET "runJson"=${JSON.stringify(run)},"status"=${run.status},"revision"=${run.revision},"updatedAt"=${new Date(now)},"leaseOwner"=NULL,"leaseExpiresAt"=NULL WHERE "projectId"=${projectId} AND "id"=${id} AND "revision"=${revision} AND ("leaseOwner" IS NULL OR "leaseExpiresAt"<=${new Date(now)})`;
+      return n===1?run:null;
+    });
+  }
+
   async list(projectId: string) {
     const rows = await this.db.$queryRaw<Row[]>`SELECT "runJson" FROM "DouyinCollectionRunRecord"
       WHERE "projectId"=${projectId} ORDER BY "createdAt" DESC, "id" DESC LIMIT 100`;

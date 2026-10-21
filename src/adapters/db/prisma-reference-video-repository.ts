@@ -4,6 +4,18 @@ import {
   referenceVideoProfileSchema,
   type ReferenceVideoProfile
 } from "../../domain/schemas.js";
+import { hashValue } from "../../domain/hashing.js";
+import { DomainValidationError } from "../../domain/validation.js";
+
+function readRow(row: {id:string;projectId:string;version:number;status:string;videoArtifactId:string;videoArtifactHash:string;contentHash:string;dataJson:string}):ReferenceVideoProfile {
+  const parsed=referenceVideoProfileSchema.parse(JSON.parse(row.dataJson));
+  if(row.id!==parsed.id||row.projectId!==parsed.projectId||row.version!==parsed.version||row.videoArtifactId!==parsed.videoArtifactId||row.videoArtifactHash!==parsed.videoArtifactHash||row.contentHash!==parsed.contentHash||row.status==="ACTIVE"&&parsed.status!=="ACTIVE")throw new DomainValidationError("参考视频数据库记录与分析内容绑定不一致");
+  if(row.status==="ACTIVE"&&parsed.observation?.version==="reference-observation-v3"){
+    const {contentHash,...body}=parsed;
+    if(hashValue(body)!==contentHash)throw new DomainValidationError("参考视频数据库分析哈希已失效");
+  }
+  return row.status==="STALE"?{...parsed,status:"STALE"}:parsed;
+}
 
 export class PrismaReferenceVideoRepository
   implements ReferenceVideoRepository
@@ -57,9 +69,7 @@ export class PrismaReferenceVideoRepository
       where: { projectId, status: "ACTIVE" },
       orderBy: { version: "desc" }
     });
-    return row
-      ? referenceVideoProfileSchema.parse(JSON.parse(row.dataJson))
-      : null;
+    return row ? readRow(row) : null;
   }
 
   async listProfiles(projectId: string): Promise<ReferenceVideoProfile[]> {
@@ -67,18 +77,7 @@ export class PrismaReferenceVideoRepository
       where: { projectId },
       orderBy: { version: "desc" }
     });
-    return rows.map((row) =>
-      referenceVideoProfileSchema.parse(
-        JSON.parse(
-          row.status === "STALE"
-            ? JSON.stringify({
-                ...JSON.parse(row.dataJson),
-                status: "STALE"
-              })
-            : row.dataJson
-        )
-      )
-    );
+    return rows.map(readRow);
   }
 
   async markActiveProfilesStale(projectId: string): Promise<void> {

@@ -84,7 +84,7 @@ export class PublishBridgeService {
       if(!pkg||pkg.projectId!==projectId||pkg.providerType!=="DOUYIN_BROWSER_AUTOMATION"||!["PACKAGE_READY","AWAITING_USER_ACTION"].includes(pkg.status)||Date.parse(pkg.expiresAt)<=Date.now())throw new DomainValidationError("原发布包不存在、已提交/结果未知或许可已过期，禁止重提");
       const others=await this.publishRepo.listPackages(projectId);
       if(others.some(other=>other.id!==pkg.id&&(other.finalArtifactHash===pkg.finalArtifactHash||other.finalAssemblyId===pkg.finalAssemblyId)&&["DIRECT_PUBLISHING","SUBMISSION_UNKNOWN","PUBLISHED_CONFIRMED"].includes(other.status)))throw new DomainValidationError("该成片已有提交或未知结果，不能通过新发布包重新上传/提交");
-      for(const other of others.filter(other=>other.id!==pkg.id&&(other.finalArtifactHash===pkg.finalArtifactHash||other.finalAssemblyId===pkg.finalAssemblyId))){const checkpoint=await browser.checkpoints.latest(projectId,other.id);if(checkpoint&&["SUBMITTING","SUBMISSION_UNKNOWN","PUBLISHED_CONFIRMED"].includes(checkpoint.phase))throw new DomainValidationError("该成片已有提交检查点或未知结果，不能通过新发布包重新上传/提交");}
+      for(const other of others.filter(other=>other.id!==pkg.id&&(other.finalArtifactHash===pkg.finalArtifactHash||other.finalAssemblyId===pkg.finalAssemblyId))){const checkpoint=await browser.checkpoints.latest(projectId,other.id);if(checkpoint)throw new DomainValidationError("该成片已有准备或提交检查点，不能通过新发布包重新上传/提交；请核对原任务，不自动解除占位");}
       const {assembly,artifact}=await this.acceptedFinal(projectId);
       if(assembly.id!==pkg.finalAssemblyId||artifact.id!==pkg.finalArtifactId||artifact.sha256!==pkg.finalArtifactHash)throw new DomainValidationError("当前成片与原发布包不一致");
       const file=await this.verifyPackageArtifact(pkg),accountKey=await browser.runtime.resolveAccountName();

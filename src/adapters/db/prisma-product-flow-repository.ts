@@ -1,5 +1,7 @@
 import type { Prisma, PrismaClient, Project as PrismaProject } from "@prisma/client";
 import { projectSchema, type Project } from "../../domain/schemas.js";
+import {hashValue} from "../../domain/hashing.js";
+import {DomainValidationError} from "../../domain/validation.js";
 import type {
   CommitVersionInput,
   ProductFlowRepository,
@@ -169,6 +171,13 @@ export class PrismaProductFlowRepository implements ProductFlowRepository {
       where: { projectId, entityType, id, version }
     });
     return row ? (JSON.parse(row.dataJson) as T) : null;
+  }
+
+  async getVerifiedVersion<T>(projectId:string,entityType:VersionedEntityType,id:string,version:number):Promise<T|null>{
+    const row=await this.db.versionedEntity.findFirst({where:{projectId,entityType,id,version}});if(!row)return null;
+    const data=JSON.parse(row.dataJson),{contentHash,...body}=data;
+    if(data.id!==row.id||data.projectId!==row.projectId||data.version!==row.version||contentHash!==row.contentHash||hashValue(body)!==row.contentHash)throw new DomainValidationError("保存版本的数据库记录与内容哈希不一致");
+    return data as T;
   }
 
   async commitVersion(input: CommitVersionInput): Promise<Project> {

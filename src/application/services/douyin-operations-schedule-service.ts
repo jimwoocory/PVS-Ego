@@ -6,19 +6,20 @@ import type { DouyinMetricService } from "./douyin-metric-service.js";
 import type { DouyinCollectionService } from "./douyin-collection-service.js";
 import { operationsScheduleInputSchema, operationsScheduleSchema, type DouyinOperationsScheduleInput, type DouyinOperationsSchedule } from "../../domain/douyin-operations-schedule.js";
 import { DomainValidationError } from "../../domain/validation.js";
-import { hashValue } from "../../domain/hashing.js";
+import { hashValue,sha256Text } from "../../domain/hashing.js";
 import type { DouyinCollectionRun } from "../../domain/douyin-collection.js";
 import {DouyinOpsRuntimeError} from "../ports/douyin-ops-runtime.js";
 
 export type OperationsScheduleDependencies = {
-  ops: Pick<DouyinOpsRepository, "findWorkBindingById" | "listComments">;
+  ops: Pick<DouyinOpsRepository, "findWorkBindingById" | "listComments"> & Partial<Pick<DouyinOpsRepository,"findMetricSnapshotByCaptureKey">>;
   metrics: Pick<DouyinMetricService, "refresh">;
-  collections: Pick<DouyinCollectionService, "start" | "advance" | "get">;
+  collections: Pick<DouyinCollectionService, "start" | "advance" | "get"> & Partial<Pick<DouyinCollectionService,"findByRequestKey"|"resumeAfterHuman">>;
   /** Must return the operations runtime's actual UID, not a nickname or publishing open_id. */
   identity(): Promise<{ uid: string }>;
 };
 
 class ScheduleDurationElapsed extends Error {}
+class ScheduleReadUnknown extends DomainValidationError {}
 
 /** Bounded read-only observations. A completed scan is not a continuous/full-history guarantee. */
 export class DouyinOperationsScheduleService {
@@ -44,7 +45,7 @@ export class DouyinOperationsScheduleService {
     const publicationKnown=Boolean(binding.publishedAt&&Date.parse(binding.publishedAt)<=this.clock().getTime());
     const cadenceState=input.cadence?cadenceStateSchema.parse({version:input.cadence.version,deadlineAt:new Date(Date.parse(input.startAt)+input.cadence.maxDurationSeconds*1000).toISOString(),publicationTime:{source:"WORK_BINDING_AT_CREATE",status:publicationKnown?"KNOWN":"UNKNOWN",...(publicationKnown?{publishedAt:binding.publishedAt}:{})}}):undefined;
     return this.repo.create(operationsScheduleSchema.parse({ id: randomUUID(), input, inputHash: hashValue(input), revision: 1,
-      status: "SCHEDULED", ...(cadenceState?{cadenceState}:{}),completedCaptures: 0, nextAt: input.startAt, consecutiveFailures: 0, history: [], createdAt: now, updatedAt: now }));
+      status: "SCHEDULED",executionProtocol:"operations-read-intent-v1", ...(cadenceState?{cadenceState}:{}),completedCaptures: 0, nextAt: input.startAt, consecutiveFailures: 0, history: [], createdAt: now, updatedAt: now }));
   }
   get(projectId: string, id: string) { return this.repo.get(projectId, id); }
   list(projectId: string) { return this.repo.list(projectId); }
@@ -57,9 +58,29 @@ export class DouyinOperationsScheduleService {
     if (!paused) throw new DomainValidationError("运营计划已变化，请刷新后暂停");
     return paused;
   }
+  async resume(input:{projectId:string;id:string;expectedRevision:number;inputHash:string;expectedAccountId:string;confirmed:boolean}){
+    const run=await this.repo.get(input.projectId,input.id);
+    if(!input.confirmed||!run||run.revision!==input.expectedRevision||run.inputHash!==input.inputHash||run.input.opsAccountUid!==input.expectedAccountId)throw new DomainValidationError("续接需要明确确认原计划的最新版本、输入哈希和运营账号");
+    if(!run.executionProtocol&&run.checkpoint)throw new DomainValidationError("历史检查点缺少读取意图协议，不能通过暂停再续接自动重读");
+    if(!["PAUSED","BLOCKED"].includes(run.status)||run.consecutiveFailures>=3||run.completedCaptures>=run.input.maxCaptures||run.terminalReason||run.input.cadence&&this.clock().getTime()>=Date.parse(run.cadenceState!.deadlineAt))throw new DomainValidationError("原计划已结束、达到上限或不可续接，不扩大观察预算");
+    if(![undefined,"AUTH_REQUIRED","RISK_CONTROL","READ_OUTCOME_UNKNOWN"].includes(run.errorCode))throw new DomainValidationError("原计划存在范围或数据错误，需先核对，不自动解除阻断");
+    await this.scope(run.input);
+    // Unknown outcomes remain intents. tick may reconcile saved results, never replay them blindly.
+    for(const runId of [run.checkpoint?.commentsRunId,...Object.values(run.checkpoint?.replyRuns??{})].filter((id):id is string=>Boolean(id))){
+      const collection=await this.d.collections.get(input.projectId,runId);
+      if(collection?.status==="BLOCKED"&&["AUTH_REQUIRED","RISK_CONTROL"].includes(collection.errorCode??"")){
+        if(!this.d.collections.resumeAfterHuman)throw new DomainValidationError("原采集缺少人工续接能力");
+        await this.d.collections.resumeAfterHuman({projectId:input.projectId,runId,expectedRevision:collection.revision,opsAccountUid:run.input.opsAccountUid});
+      }
+    }
+    const resumed=await this.repo.resume?.(input.projectId,run.id,run.revision,run.inputHash,this.now());
+    if(!resumed)throw new DomainValidationError("原计划版本、租约或续接能力已变化");
+    return resumed;
+  }
   private checkCollection(run: DouyinCollectionRun) {
     if (run.status !== "BLOCKED") return;
     if(["AUTH_REQUIRED","RISK_CONTROL"].includes(run.errorCode??""))throw new DouyinOpsRuntimeError(run.errorCode!,"原采集等待人工登录或风控处理，调度暂停，不自动重试");
+    if(run.errorCode==="READ_FAILED")throw new ScheduleReadUnknown("原采集未保存完整游标结果，不自动重读或新建任务");
     if (!run.retryable) throw new DomainValidationError(run.errorMessage ?? "原采集已被阻断，需核对原作品与游标");
     throw new Error(run.errorMessage ?? "原采集暂时失败，将有界退避重试");
   }
@@ -71,16 +92,43 @@ export class DouyinOperationsScheduleService {
     const claimed = await this.repo.claim(projectId, id, existing.revision, owner, this.now(), this.until());
     if (!claimed) return (await this.repo.get(projectId, id))!;
     let run: DouyinOperationsSchedule = claimed;
-    const assertLease=async()=>{const current=await this.repo.get(projectId,id);if(!current||current.status==="PAUSED"||current.revision!==run.revision)throw new DomainValidationError("运营计划已暂停或执行权改变，停止后续读取");};
+    const assertLease=async()=>{
+      if(!this.repo.assertLease)throw new DomainValidationError("缺少持久租约核验能力，停止读取");
+      await this.repo.assertLease(projectId,id,run.revision,owner,this.now());
+    };
     const assertWindow=()=>{
       if(!run.input.cadence)return;
       const expected=new Date(Date.parse(run.input.startAt)+run.input.cadence.maxDurationSeconds*1000).toISOString();
       if(!run.cadenceState||run.cadenceState.version!==run.input.cadence.version||run.cadenceState.deadlineAt!==expected)throw new DomainValidationError("调度策略或原观察时间上限缺失/变化，不能自动扩大计划");
       if(this.clock().getTime()>=Date.parse(run.cadenceState.deadlineAt))throw new ScheduleDurationElapsed("观察时间上限已到，停止后续读取");
     };
-    const readScope=async()=>{assertWindow();const binding=await this.scope(run.input);assertWindow();return binding;};
+    const readScope=async()=>{await assertLease();assertWindow();const binding=await this.scope(run.input);await assertLease();assertWindow();return binding;};
+    const fence=async()=>{await assertLease();assertWindow();};
+    const writeFence=()=>({projectId,scheduleId:id,revision:run.revision,owner,now:()=>this.now(),deadlineAt:run.cadenceState?.deadlineAt});
     const save = async () => { run.updatedAt = this.now(); run = await this.repo.save(run, owner, this.until()); };
     const later = () => { run.status = "SCHEDULED"; run.nextAt = new Date(this.clock().getTime() + run.input.intervalSeconds * 1000).toISOString(); };
+    const checkHandle=(item:DouyinCollectionRun,kind:"COMMENTS"|"REPLIES",parentCid?:string)=>{
+      if(item.projectId!==projectId||item.bindingId!==run.input.bindingId||item.awemeId!==run.input.awemeId||item.opsAccountUid!==run.input.opsAccountUid||item.kind!==kind||item.parentCid!==parentCid||item.pageSize!==run.input.pageSize||item.batchPages!==1)throw new DomainValidationError("原采集检查点与计划的作品、账号、父评论或边界不一致");
+    };
+    const recoverPending=async()=>{
+      const pending=run.checkpoint?.pendingRead;if(!pending)return;
+      if(pending.kind==="METRICS"){
+        const key="schedule:"+run.id+":"+(run.completedCaptures+1)+":metrics";
+        if(pending.requestKey!==key)throw new DomainValidationError("原指标意图与计划不一致");
+        const snapshot=await this.d.ops.findMetricSnapshotByCaptureKey?.(projectId,key);
+        if(!snapshot)throw new ScheduleReadUnknown("原指标读取结果不明，保留意图，不自动重读");
+        if(snapshot.bindingId!==run.input.bindingId||snapshot.awemeId!==run.input.awemeId||sha256Text(snapshot.rawJson)!==snapshot.contentHash)throw new DomainValidationError("原指标结果与计划绑定或哈希不一致");
+        run.checkpoint!.metricsSnapshotId=snapshot.id;run.checkpoint!.metricsCapturedAt=snapshot.capturedAt;run.checkpoint!.metricObservation=metricObservation(snapshot);run.checkpoint!.metricsPartial=Object.values(snapshot.metricAvailability??{}).some(v=>v!=="OBSERVED");
+      }else{
+        const expected="schedule:"+run.id+":"+run.checkpoint!.index+(pending.kind==="COMMENTS"?":comments":":replies:"+pending.parentCid);
+        if(pending.requestKey!==expected||pending.kind==="REPLIES"&&!run.checkpoint!.parents?.includes(pending.parentCid!))throw new DomainValidationError("原评论读取意图超出计划");
+        const item=pending.collectionRunId?await this.d.collections.get(projectId,pending.collectionRunId):await this.d.collections.findByRequestKey?.(projectId,pending.requestKey);
+        if(!item||!(["PARTIAL","COMPLETED"].includes(item.status)&&item.pages>(pending.pagesBefore??0)||item.status==="BLOCKED"&&["AUTH_REQUIRED","RISK_CONTROL","PROVIDER_ERROR","SITE_OFFLINE","BRIDGE_OFFLINE"].includes(item.errorCode??"")))throw new ScheduleReadUnknown("原评论读取结果不明，保留原游标，不自动新建或重读");
+        checkHandle(item,pending.kind,pending.parentCid);
+        if(pending.kind==="COMMENTS")run.checkpoint!.commentsRunId=item.id;else run.checkpoint!.replyRuns[pending.parentCid!]=item.id;
+      }
+      run.checkpoint!.pendingRead=undefined;await save();
+    };
     const finishObservation = async (topComplete: boolean, repliesDone: boolean) => {
       const capture = run.checkpoint!;
       const complete = topComplete && repliesDone;
@@ -110,28 +158,41 @@ export class DouyinOperationsScheduleService {
     try {
       await assertLease();
       if(hashValue(run.input)!==run.inputHash)throw new DomainValidationError("原运营计划输入哈希不一致，停止执行");
+      if(!run.executionProtocol){
+        if(existing.status==="RUNNING")throw new DomainValidationError("历史运行中计划没有读取意图协议，结果不可核验，不自动续接");
+        run.executionProtocol="operations-read-intent-v1";await save();
+      }
       assertWindow();
       const binding = await readScope();
+      if(run.completedCaptures>=run.input.maxCaptures){run.status="COMPLETED";run.terminalReason="MAX_CAPTURES";await save();return run;}
       if (!run.checkpoint) {
         run.checkpoint = { index: run.completedCaptures + 1, startedAt: this.now(), replyRuns: {}, parentLimitReached: false };
         await save();
       }
+      await recoverPending();
       const key = "schedule:" + run.id + ":" + run.checkpoint!.index;
       if (!run.checkpoint!.metricsSnapshotId) {
         await assertLease();assertWindow();
+        run.checkpoint!.pendingRead={kind:"METRICS",requestKey:"schedule:"+run.id+":"+(run.completedCaptures+1)+":metrics",startedAt:this.now()};await save();
         const snapshot = await this.d.metrics.refresh({ projectId, bindingId:binding.id,awemeId:run.input.awemeId,packageId: binding.packageId,
-          captureKey: "schedule:" + run.id + ":" + (run.completedCaptures + 1) + ":metrics" });
+          captureKey: "schedule:" + run.id + ":" + (run.completedCaptures + 1) + ":metrics",beforeRead:fence,beforePersist:fence,writeFence:writeFence() });
         await assertLease();
         run.checkpoint!.metricsSnapshotId=snapshot.id;run.checkpoint!.metricsCapturedAt=this.now();
         run.checkpoint!.metricObservation=metricObservation(snapshot);
         run.checkpoint!.metricsPartial=Boolean(snapshot.metricAvailability&&Object.values(snapshot.metricAvailability).some(value=>value!=="OBSERVED"));
+        run.checkpoint!.pendingRead=undefined;
         await save();await readScope();
       }
       const previousTop = run.checkpoint!.commentsRunId ? await this.d.collections.get(projectId, run.checkpoint!.commentsRunId) : null;
       await assertLease();assertWindow();
       if (run.checkpoint!.commentsRunId && !previousTop) throw new DomainValidationError("原评论采集检查点缺失，不能悄悄重新从第一页采集");
-      const top = previousTop ? previousTop.status === "COMPLETED" ? previousTop : await this.d.collections.advance({ projectId, runId: previousTop.id })
-        : await this.d.collections.start({ projectId, requestKey: key + ":comments", bindingId: binding.id, awemeId: run.input.awemeId, kind: "COMMENTS", batchPages: 1, pageSize: run.input.pageSize });
+      if(previousTop)checkHandle(previousTop,"COMMENTS");
+      if(!previousTop||previousTop.status!=="COMPLETED"){
+        run.checkpoint!.pendingRead={kind:"COMMENTS",requestKey:key+":comments",startedAt:this.now(),...(previousTop?{collectionRunId:previousTop.id,pagesBefore:previousTop.pages}:{})};await save();
+      }
+      const top = previousTop ? previousTop.status === "COMPLETED" ? previousTop : await this.d.collections.advance({ projectId, runId: previousTop.id,beforeReadOrPersist:fence,writeFence:writeFence() })
+        : await this.d.collections.start({ projectId, requestKey: key + ":comments", bindingId: binding.id, awemeId: run.input.awemeId, kind: "COMMENTS", batchPages: 1, pageSize: run.input.pageSize },fence,writeFence());
+      await fence();checkHandle(top,"COMMENTS");if(top.errorCode!=="READ_FAILED")run.checkpoint!.pendingRead=undefined;
       run.checkpoint!.commentsRunId = top.id; await save(); this.checkCollection(top);
       if (top.status !== "COMPLETED" || top.hasMore) return await finishObservation(false, false);
       if (!run.checkpoint!.parents) {
@@ -146,11 +207,14 @@ export class DouyinOperationsScheduleService {
         const priorId = run.checkpoint!.replyRuns[cid];
         const prior = priorId ? await this.d.collections.get(projectId, priorId) : null;
         if (priorId && !prior) throw new DomainValidationError("原楼中楼采集检查点缺失，未重新采集");
+        if(prior)checkHandle(prior,"REPLIES",cid);
         if (prior?.status === "COMPLETED" && !prior.hasMore) continue;
         await assertLease();assertWindow();
-        const reply = prior ? await this.d.collections.advance({ projectId, runId: prior.id }) : await this.d.collections.start({
+        run.checkpoint!.pendingRead={kind:"REPLIES",requestKey:key+":replies:"+cid,parentCid:cid,startedAt:this.now(),...(prior?{collectionRunId:prior.id,pagesBefore:prior.pages}:{})};await save();
+        const reply = prior ? await this.d.collections.advance({ projectId, runId: prior.id,beforeReadOrPersist:fence,writeFence:writeFence() }) : await this.d.collections.start({
           projectId, requestKey: key + ":replies:" + cid, bindingId: binding.id, awemeId: run.input.awemeId,
-          kind: "REPLIES", parentCid: cid, batchPages: 1, pageSize: run.input.pageSize });
+          kind: "REPLIES", parentCid: cid, batchPages: 1, pageSize: run.input.pageSize },fence,writeFence());
+        await fence();checkHandle(reply,"REPLIES",cid);if(reply.errorCode!=="READ_FAILED")run.checkpoint!.pendingRead=undefined;
         run.checkpoint!.replyRuns[cid] = reply.id; await save(); this.checkCollection(reply);
         break; // At most one reply page per tick, regardless of parent count.
       }
@@ -165,14 +229,18 @@ export class DouyinOperationsScheduleService {
       // Pausing invalidates the fence. Never overwrite the user's newer pause or another worker.
       const latest = await this.repo.get(projectId, id);
       if (!latest || latest.status === "PAUSED" || latest.revision !== run.revision) return latest ?? run;
+      try{await assertLease();}catch{return latest;}
       if(error instanceof ScheduleDurationElapsed){
         run.status="COMPLETED";run.terminalReason="MAX_DURATION";run.errorCode="OBSERVATION_WINDOW_ENDED";run.errorMessage=error.message;await save();return run;
       }
       run.consecutiveFailures = Math.min(3, run.consecutiveFailures + 1);
-      const permanent = error instanceof DomainValidationError;
+      const knownReadFailure=error instanceof DouyinOpsRuntimeError;
+      if(knownReadFailure&&run.checkpoint)run.checkpoint.pendingRead=undefined;
+      const unknown=error instanceof ScheduleReadUnknown||Boolean(run.checkpoint?.pendingRead)&&!knownReadFailure;
+      const permanent = error instanceof DomainValidationError||unknown;
       const humanRequired=error instanceof DouyinOpsRuntimeError&&["AUTH_REQUIRED","RISK_CONTROL"].includes(error.code);
       run.status = humanRequired?"PAUSED":permanent || run.consecutiveFailures >= 3 ? "BLOCKED" : "SCHEDULED";
-      run.errorCode = error instanceof DouyinOpsRuntimeError?error.code:permanent ? "SCOPE_OR_DATA_CHANGED" : "READ_FAILED";
+      run.errorCode = unknown?"READ_OUTCOME_UNKNOWN":error instanceof DouyinOpsRuntimeError?error.code:permanent ? "SCOPE_OR_DATA_CHANGED" : "READ_FAILED";
       run.errorMessage = error instanceof Error ? error.message.slice(0, 500) : "运营只读采集失败";
       const retrySeconds=run.input.cadence?Math.max(run.input.cadence.minIntervalSeconds,Math.min(run.input.cadence.maxIntervalSeconds,Math.max(run.cadenceState?.lastIntervalSeconds??run.input.intervalSeconds,run.input.intervalSeconds*2**run.consecutiveFailures))):Math.min(86400,run.input.intervalSeconds*2**run.consecutiveFailures);
       run.nextAt=new Date(Math.min(this.clock().getTime()+retrySeconds*1000,run.input.cadence&&run.cadenceState?Date.parse(run.cadenceState.deadlineAt):Infinity)).toISOString();
