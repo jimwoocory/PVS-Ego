@@ -323,3 +323,16 @@ C17最终构建退出0，唯一test:ego-lite-douyin-read **36 PASS/0 FAIL（35�
 本轮未发现新的已确认产品缺陷，公开只更新四份验收说明，165项文件覆盖集合不变。实际业务仓库为内存替身，不能把本机原生点击当作真实平台、Prisma取消组合或默认运营账号验收。后续每轮一个套件：test:go-research，再test:go-u1-session；两者本轮未跑，C17共享研究异步pin完整路径仍待重验。真实第二页/预取/虚拟列表/风控、旧C16宿主退出根因、小时天级/睡眠断电/完整OS审计、其余U2–U5及正式GitHubApprove继续保留。
 
 模型aihubmix/deepseek-v4.1-flash、音频NOT_OBSERVED、费用UNKNOWN和原Agent人工确认/隔离边界保持；无真实平台/账号读取、素材外发、模型/上传/付费生成/发布/回复、原3090操作、合并或部署。
+
+
+## PR #1 C20 Go research 完整隔离重验
+
+2026-10-22以8545fba为基线，构建退出0；本轮唯一test:go-research完整套件 **6 PASS / 0 FAIL（5子项及父项）、退出0、9276.3506ms**，离线Go编译退出0。实际Go1.26.9、原CLI/SDK、全新Ego实例/profile、新UUID会话/Go缓存、迁移新建空白SQLite和Prisma参与；只读取固定本机nonce动态页面，不复制旧配置/项目/账号。未发现新增已确认产品缺陷，未改产品、运行器、守卫或测试断言，本轮只更新四份公开验收文档，165项覆盖集合不变。
+
+实际动态正文经原Agent具体确认进入ResearchService、ResearchEvidence与不可变JSON artifact，保存1131字节及1条Evidence。38个桥事件、1个document、3次固定GET；8项回执源码SHA与当前文件匹配，守卫未改。缓存/同run幂等、未确认/旧版本拒绝、跨项目/URL/run拒绝、篡改拒绝并恢复原摘要、业务进程重启后同证据/正文摘要且不重采、宿主断连后新采集失败且不重试/不复用旧证据均通过。探针/流式取消/1.8秒超时保持，一个终态且worker退出已确认。
+
+Go构建、套件和四个记录应用子进程（宿主、Go桥、重启前后业务进程）全部退出0；四应用PID实查消失。只读核验新库2个BLOCKED Agent周期、2个研究run、1条Evidence、1个READY artifact和断连失败保留的1个PENDING占位，活租约0；失败占位不是新证据，不自动清理或重采。模型provider/execution、生成request/attempt、摘要brief、发布attempt和回复write-intent均0。摘要明确BRIEF_GENERATION_NOT_AUTHORIZED，音频NOT_OBSERVED、费用UNKNOWN，模型选择aihubmix/deepseek-v4.1-flash保持。
+
+范围限制：本套件使用固定GoLocalResearchProvider，不经过默认工作台监督进程；因此C17共享监督初始化的异步完整pin路径仍未由本套件验收。生产默认工厂/原生工作台点击、截图和真人接管/归还本轮未运行；前轮C19桥原生点击9/9独立保留，不拼成同一次E2E。没有真实平台或账号读取，没有模型、外发、付费生成、上传、发布、回复、原3090操作、合并或部署。
+
+下一轮优先test:go-u1-session完整隔离套件，仍单轮一个套件。另保留默认监督异步pin初始化路径、C16原宿主退出原因、真实第二页/预取/虚拟列表/图集/隐藏指标/风控、小时天级/睡眠断电/完整OS审计、其余U2–U5及GitHub正式独立Approve未验收；本轮6/6不代替这些结果。库、配置、profile、原始日志和正文证据仅在私有.runtime保留。
