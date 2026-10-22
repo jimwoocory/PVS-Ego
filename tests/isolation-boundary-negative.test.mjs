@@ -81,7 +81,7 @@ test('isolated boundary: fail closed before production paths, transports, tasks 
   });
   await t.test('fresh relocated code and physical dependencies initialize without source checkout or old local state',async()=>{
     const relocated=path.join(root,'.runtime','relocated PVS 独立 '+randomUUID());fs.mkdirSync(relocated);
-    for(const name of ['node_modules','scripts','prisma','dist','config','skills','browser-extension']){
+    for(const name of ['node_modules','scripts','prisma','dist','config','skills','browser-extension','execution','src','tests']){
       fs.cpSync(path.join(root,name),path.join(relocated,name),{recursive:true,filter:p=>!p.endsWith('.db')});
     }
     fs.copyFileSync(path.join(root,'package.json'),path.join(relocated,'package.json'));
@@ -106,6 +106,12 @@ test('isolated boundary: fail closed before production paths, transports, tasks 
       assert.equal(fs.statSync(path.join(attempt.session,'go-cache')).isDirectory(),true);
       const failure=JSON.parse(fs.readFileSync(path.join(attempt.session,'evidence/attempt-failed.json'),'utf8'));
       assert.equal(failure.code,'ENOENT');assert.ok(failure.reason.includes(missingGo),failure.reason);
+      if(runner==='run-go-bridge-isolated.mjs'){
+        const manifest=JSON.parse(fs.readFileSync(path.join(attempt.session,'evidence/source-manifest.json'),'utf8'));
+        assert.equal(Object.keys(failure.sourceHashes).length,12);assert.deepEqual(failure.sourceHashes,manifest.sourceHashes);
+        const guardSource=fs.readFileSync(path.join(relocated,'execution/go-ego-bridge/lifetime_windows.go'));
+        assert.equal(failure.sourceHashes['execution/go-ego-bridge/lifetime_windows.go'],createHash('sha256').update(guardSource).digest('hex'));
+      }
       assert.equal(fs.existsSync(path.join(attempt.session,'evidence/final-acceptance.json')),false);
     }
     const reserve=net.createServer();await new Promise(resolve=>reserve.listen(0,'127.0.0.1',resolve));const port=reserve.address().port;await new Promise(resolve=>reserve.close(resolve));

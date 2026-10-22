@@ -10,7 +10,7 @@ C10的`test:ego-lite-workbench`历史最终 **7/7、退出0**，覆盖实际 Go/
 
 前轮C7完成修复后 `test:go-research` 完整隔离回归 **6/6、退出0**：原生Go/CLI/SDK、新建Ego实例与动态合成页面，经原Agent/ResearchService保存实际新空白SQLite/Prisma证据，验证篡改拒绝、业务进程重启后幂等与宿主断连不重试。4个应用子进程正常退出0，模型/搜索调用0；未发现新的已确认产品缺陷。该轮之后的U1回归现由C8补齐。详见[本轮范围与缺口](docs/PUBLIC-CHANGE-REVIEW-2026-10-21.md#pr-1-修复后-go-研究完整隔离回归-c7)。
 
-前轮C6完成 `test:go-bridge` **9/9、退出0**，实际 Go → Node CLI/SDK → 新建隔离 Ego 实例、原业务门禁、HTTP及内置浏览器原生点击通过；使用本机合成页面与内存业务仓库，无模型或平台调用。首次取消交互失败已保留，最终仅复跑同一套件；本轮未重跑该专项，详见[历史回归与限制](docs/PUBLIC-CHANGE-REVIEW-2026-10-21.md#pr-1-修复后-go-桥完整隔离回归-c6)。
+前轮C6完成 `test:go-bridge` **9/9、退出0**，实际 Go → Node CLI/SDK → 新建隔离 Ego 实例、原业务门禁、HTTP及内置浏览器原生点击通过；使用本机合成页面与内存业务仓库，无模型或平台调用。首次取消交互失败已保留，最终仅复跑同一套件；C12重跑的原生UI阻断结果见上文，不能沿用该历史通过。详见[历史回归与限制](docs/PUBLIC-CHANGE-REVIEW-2026-10-21.md#pr-1-修复后-go-桥完整隔离回归-c6)。
 
 已加入 [Windows 隔离 CI](.github/workflows/isolated-ci.yml)：全新锁定依赖安装、显式引擎准备、新空库及客户端加固、构建和单一边界套件。首个 GitHub Actions 运行通过，C5本地最终同套件 **27/27、退出0**。独立代码审查发现的历史位置文件依赖已修复，三个 Go 入口自行创建会话及缓存；C5仅验证它们在缺失编译器前置失败时不读取旧状态，不执行 Go/Ego。独立静态审查不等于 GitHub Approve；当前检查结果与剩余范围见[审查记录](docs/PUBLIC-CHANGE-REVIEW-2026-10-21.md#pr-1-ci-与独立代码审查-c5)。PR本轮公开候选集合为143个文件，以提交后的GitHub文件列表再核对。
 
