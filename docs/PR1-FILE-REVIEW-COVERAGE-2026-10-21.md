@@ -1,6 +1,6 @@
 # PR #1 逐文件审查覆盖清单
 
-审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录代替文件**。C1/C2/C3各新增3项，C4再新增8项，C5新增CI workflow及首次进入PR差异的原边界套件共2项，C8新增本地测试说明1项，C9新增定向运行器与两个测试文件3项，C10新增7项，C11新增8项，C13新增12项后为163项，C17新增2项；截至C23当前公开差异为 **165 项**。新增项在末表单独列出，已修改的原文件仍计入原113项；提交后再核对GitHub集合。
+审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录代替文件**。C1/C2/C3各新增3项，C4再新增8项，C5新增CI workflow及首次进入PR差异的原边界套件共2项，C8新增本地测试说明1项，C9新增定向运行器与两个测试文件3项，C10新增7项，C11新增8项，C13新增12项后为163项，C17新增2项；截至C24当前公开差异为 **165 项**。新增项在末表单独列出，已修改的原文件仍计入原113项；提交后再核对GitHub集合。
 
 这是指定深度的静态审查与证据索引，**不是165个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。worker运行证据以C4为准；后续专项均分轮单独运行，不能拼接成完整平台E2E。C5另有全新独立审查者静态复核，范围与限制见末表及分轮记录。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
 
@@ -290,7 +290,7 @@ Tabbit创建标签时协议拒绝，未执行页面操作，空闲空任务已�
 | --- | --- | --- | --- | --- |
 | N24 | [scripts/ego-lite-installation.mjs](../scripts/ego-lite-installation.mjs) | 安装固定与路径 | 独立本地清单、物理文件、执行文件/宿主源码/桥源码摘要变化拒绝 | C10 |
 | N25 | [scripts/configure-ego-lite.mjs](../scripts/configure-ego-lite.mjs) | 离线配置与Go编译 | 显式本地路径、净化env、禁止下载、不读取旧profile、编译退出后原子写清单 | C10本机配置 |
-| N26 | [scripts/ego-lite-supervisor.mjs](../scripts/ego-lite-supervisor.mjs) | 默认异步初始化及边界复验 | F29校验后/Go启动前重验取消/关闭/归属/原DB授权；F30有限失败原因，无迟到宿主 | C10,C22 12/12 |
+| N26 | [scripts/ego-lite-supervisor.mjs](../scripts/ego-lite-supervisor.mjs) | 默认异步初始化及宿主看门狗 | F29/F30启动门禁与原因保持；F31接共享单调租约心跳，时钟偏移不误判 | C10,C22 12/12,C24 15/15 |
 | N27 | [scripts/serve-ego-lite-child.mjs](../scripts/serve-ego-lite-child.mjs) | 受守卫的默认业务进程 | 固定IPC协议、原研究Provider/Prisma Artifact、AbortSignal、真实退出后上报、握手限时 | C10 |
 | N28 | [scripts/run-ego-lite-workbench.mjs](../scripts/run-ego-lite-workbench.mjs) | 单一专项与最终回执 | 新UUID会话、源码摘要、套件/全部自有子进程退出后才写最终PASS | C10 7/7 |
 | N29 | [tests/ego-lite-workbench-isolated.test.mjs](../tests/ego-lite-workbench-isolated.test.mjs) | 实际默认宿主/DB/HTTP回归 | 真实30pin完整流、暂停HTTP、坏摘要/I/O/授权/取消/关闭；原采集/PNG/竞争/重启保持，非原生点击 | C10,C22 12/12 |
@@ -302,9 +302,9 @@ Tabbit创建标签时协议拒绝，未执行页面操作，空闲空任务已�
 
 | 编号 | 文件 | 复核深度 | 审查焦点与结果 | 关联运行证据 |
 | --- | --- | --- | --- | --- |
-| N31 | [scripts/run-ego-lite-lifecycle.mjs](../scripts/run-ego-lite-lifecycle.mjs) | 单一专项/最终退出 | 新隔离会话、源码摘要及故障/退出核验后才写PASS | C11 9/9 |
-| N32 | [tests/ego-lite-lifecycle-isolated.test.mjs](../tests/ego-lite-lifecycle-isolated.test.mjs) | 实际宿主/Prisma/HTTP完整复验 | 异步pin中关闭/强杀、断连、租约、超时/前后取消及只读页；未知/非零退出保持 | C11,C23 11/11 |
-| N33 | [tests/support/ego-lite-lifecycle-supervisor.mjs](../tests/support/ego-lite-lifecycle-supervisor.mjs) | 可信故障控制器 | 同一生产启动/stop；真实pin流暂停/释放与快照，不改安装文件，不作为真人Ctrl+C证据 | C11,C23 |
+| N31 | [scripts/run-ego-lite-lifecycle.mjs](../scripts/run-ego-lite-lifecycle.mjs) | 单一专项/最终退出 | 新隔离会话、21项源码摘要（含共享看门狗/安装库）、故障及真实退出核验后才写PASS | C11,C24 15/15 |
+| N32 | [tests/ego-lite-lifecycle-isolated.test.mjs](../tests/ego-lite-lifecycle-isolated.test.mjs) | 实际宿主/Prisma/HTTP完整复验 | 默认宿主前后时钟/冻结倒退心跳/错误租约，原pin/退出/超时组合；未知及非零退出保持 | C11,C23,C24 15/15 |
+| N33 | [tests/support/ego-lite-lifecycle-supervisor.mjs](../tests/support/ego-lite-lifecycle-supervisor.mjs) | 可信故障控制器 | 同一生产启动/stop；真实pin流门控，仅本轮入口固定时钟/心跳注入与缓冲真实ready；不改安装/系统时钟 | C11,C23,C24 |
 | N34 | [tests/support/ego-lite-owned-fault.ps1](../tests/support/ego-lite-owned-fault.ps1) | 原生故障与归属 | 父PID/命令/本轮目录核验后才暂停/终止，仅跟踪系统控制台不暂停 | C11 |
 | N35 | [src/web/douyin-ops-http.ts](../src/web/douyin-ops-http.ts) | 首次进入PR差异 | 禁用端口明确503；页面HTML/API类型码分离，无启动权限扩张 | C11及默认3097 HTTP |
 | N36 | [src/web/douyin-ops-ui.ts](../src/web/douyin-ops-ui.ts) | 首次进入PR差异 | 转义错误文案、未知账号/未采集与工作台导航，无启动按钮 | C11 HTTP；视觉未验 |
@@ -382,7 +382,7 @@ C16最终构建/离线Go编译退出0，唯一test:ego-lite-douyin-read最终 **
 
 | 序号 | 文件 | 审查范围 | 结论与边界 | 验证 |
 | --- | --- | --- | --- | --- |
-| N51 | [scripts/ego-lite-host-watchdog.mjs](../scripts/ego-lite-host-watchdog.mjs) | 固定宿主租约/生命周期 | 原子序号、父PID/随机租约、单调五秒；有限退出回执；无网站或模型调用 | C17原生隔离探针 |
+| N51 | [scripts/ego-lite-host-watchdog.mjs](../scripts/ego-lite-host-watchdog.mjs) | 固定宿主租约/生命周期 | 原子序号、父PID/随机租约、单调五秒；有限退出回执；无网站或模型调用 | C17原生隔离探针,C24默认研究宿主 |
 | N52 | [tests/support/ego-lite-host-watchdog-probe.mjs](../tests/support/ego-lite-host-watchdog-probe.mjs) | 可信故障探针 | 新空白profile、固定clock/lease-owner故障、拒绝外部网络；父死未取得quit回执不伪造OS退出0 | C17 |
 
 165项集合；本轮另审查安装校验、两个监督进程、受守卫child、运营缓存、定向runner与主测试/原support及五份公开说明。F26固定时钟/mtime误退出风险、F27异步完整pin防心跳阻塞、F28退出主动撤销READY/分页并拒绝迟到结果。旧C16退出根因仍未知，不能把受控复现当作原历史原因。
@@ -437,3 +437,10 @@ C17最终构建退出0，唯一test:ego-lite-douyin-read **36 PASS/0 FAIL（35�
 本轮唯一test:ego-lite-lifecycle最终 **11 PASS / 0 FAIL、退出0、94483.3189ms**，构建退出0。更新旧503预期为当前未连接只读200/旧launch403，保留首轮0/2失败。新增异步pin等待期间正常关闭和监督强杀；正常关闭完整校验30pin但不启动宿主/Go，异常退出重开仍OUTCOME_UNKNOWN/workerExited=false。宿主注入退出、活租约、运行中关闭/强杀、十秒超时及取消先后顺序全部通过，实测超时10008/10009ms，不重试或虚构退出。
 
 12场景/恢复回执ownedGone，49个可提取PID消失；22条业务侧退出含21条0及1条预期宿主91，2个监督强杀保留code=null/signal=SIGTERM。9个新库无活租约/模型/生成/发布/回复；19源码SHA匹配，实际合成页PNG核验。本轮只改测试控制器/断言及说明，C22业务修复未改，既有3097/登录会话未重载。剩余时钟跳变、无限I/O、长稳/OS故障、真人归还及真实平台/U2–U5/Approve仍保留；不发布、回复、合并或部署。详见[分轮记录](PUBLIC-CHANGE-REVIEW-2026-10-21.md#pr-1-c23-异步-pin-修复后的生命周期组合)。
+
+
+## C24 默认研究宿主时钟与看门狗（2026-10-22）
+
+本轮唯一test:ego-lite-lifecycle最终 **15 PASS / 0 FAIL、退出0、120113.8749ms**，构建退出0。F31/P2修复默认研究宿主Date.now/mtime心跳，接入已有原子序号/随机租约/单调五秒看门狗；受控前后各一小时时钟偏移后实际采集成功。后跳且冻结序号持续刷新mtime时5107ms失效；倒退序号/错误租约拒绝，不启动Go或重试。偏移仅限本轮宿主Date.now，未改系统/监督进程全局时钟；可信控制器只暂缓原宿主真实ready，不伪造ready或改原安装文件。
+
+原pin关闭/强杀、宿主故障、监督退出/恢复及取消超时组合全部重验，两次实际超时10037/10010ms。16回执、68记录PID消失，31业务侧退出中30条0/1条预期91；2个强杀监督保持未知。13库无活租约/模型/生成/发布/回复，21源码摘要匹配，两张合成PNG核验。失败探针的回调0与真实OS码2147483651差异保留为FAIL，修正注入后完整复跑，不累计失败轮。现有3097/登录会话未重载。系统时钟/睡眠/长稳、真人点击归还、真实平台/U2–U5/Approve仍缺；不发布、回复、合并或部署。详见[分轮记录](PUBLIC-CHANGE-REVIEW-2026-10-21.md#pr-1-c24-默认研究宿主时钟与看门狗)。

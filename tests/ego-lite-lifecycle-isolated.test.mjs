@@ -68,12 +68,31 @@ test('actual owned Ego host disconnect, supervisor shutdown and timeout combinat
   await until(()=>[...c.knownPids].filter(alive),pids=>!pids.length,'owned PIDs gone');return receipt;
  }
  function verifyDb(c){for(const table of ['AiProviderConfigRecord','AiExecutionRecord','GenerationRequestRecord','GenerationAttemptRecord'])assert.equal(c.db.prepare('SELECT COUNT(*) AS n FROM '+table).get().n,0,table);}
- function record(c,expectedExitsVerified=true){verifyDb(c);const state={name:c.name,expectedExitsVerified,ownedGone:[...c.knownPids].every(pid=>!alive(pid)),supervisor:{pid:c.p.pid,closed:c.closed,code:c.code,signal:c.signal},faults:c.faults,receipt:c.receipt??null,cycle:c.cycle?c.readCycle():null};cases.push(state);fs.writeFileSync(path.join(session,'evidence',c.name+'.json'),JSON.stringify({...state,stderr:c.errors,stdout:c.output},null,2));}
+ function record(c,expectedExitsVerified=true){verifyDb(c);const state={name:c.name,expectedExitsVerified,ownedGone:[...c.knownPids].every(pid=>!alive(pid)),knownPids:[...c.knownPids],actionDirectory:c.actionDirectory,supervisor:{pid:c.p.pid,closed:c.closed,code:c.code,signal:c.signal},faults:c.faults,receipt:c.receipt??null,cycle:c.cycle?c.readCycle():null};cases.push(state);fs.writeFileSync(path.join(session,'evidence',c.name+'.json'),JSON.stringify({...state,stderr:c.errors,stdout:c.output},null,2));}
  t.after(async()=>{for(const c of resources){try{if(c.frozen){if(c.closed)await resumeAfterDeath(c);else await fault(c,'Resume');}if(!c.closed)await stop(c,c.faults.some(f=>f.mode==='Terminate'));}catch(error){fs.writeFileSync(path.join(session,'evidence',c.name+'-cleanup-failed.json'),JSON.stringify({error:error.message,stderr:c.errors}));if(!c.closed)c.p.kill();}finally{c.db.close();}}});
  const check=async(name,fn)=>{let passed=false;await t.test(name,async()=>{await fn();passed=true;});results.push({name,passed});assert.ok(passed,name);};
  const finishAction=async c=>{const result=await c.advance;assert.ok(result.value,result.error);return result.value;};
  const evidenceCount=c=>c.db.prepare('SELECT COUNT(*) AS n FROM ResearchEvidenceRecord').get().n;
  const terminalEvents=s=>s.events.filter(e=>['succeeded','failed','timed_out','cancelled','rejected'].includes(e.type));
+ const watchdogReceipt=c=>{const files=fs.readdirSync(c.actionDirectory).filter(f=>/^host-lifecycle-[a-f0-9-]{36}\.json$/.test(f));assert.equal(files.length,1);return JSON.parse(fs.readFileSync(path.join(c.actionDirectory,files[0]),'utf8'));};
+ await check('default research bootstrap survives a forward and backward host clock jump with fresh heartbeats',async()=>{
+  const c=await open('clock-sweep');await c.rpc('clock-sweep');await c.start({waitForWorker:false});
+  const state=await until(()=>c.rpc('snapshot'),s=>Boolean(s.active),'actual default initialization');await remember(c,state);
+  const result=await finishAction(c);assert.equal(result.status,'WAITING_USER',JSON.stringify(result.actions[0]));assert.equal(result.actions[0].localExecution.phase,'SUCCEEDED');assert.equal(evidenceCount(c),1);
+  await remember(c,await c.rpc('snapshot'));await stop(c);
+  const clock=JSON.parse(fs.readFileSync(path.join(c.actionDirectory,'test-clock-probe.json'),'utf8'));assert.deepEqual(clock.steps.map(s=>s.offset),[3600000,-3600000,0]);assert.equal(clock.readyReleased,true);assert.equal(clock.originalReadyObserved,true);assert.ok(clock.steps.every(s=>s.heartbeatAgeMs>=-5&&s.heartbeatAgeMs<1500));
+  const receipt=watchdogReceipt(c);assert.equal(receipt.reason,'STOP_REQUESTED');assert.equal(receipt.phase,'QUIT');assert.equal(receipt.exitCode,0);record(c);
+ });
+ for(const [mode,reason]of [['frozen-heartbeat','HEARTBEAT_STALE'],['regressed-heartbeat','HEARTBEAT_INVALID'],['wrong-lease','HEARTBEAT_INVALID']])await check('default research watchdog rejects '+mode+' despite a backward host clock',async()=>{
+  const c=await open(mode);await c.rpc(mode);await c.start({waitForWorker:false});await remember(c,await until(()=>c.rpc('snapshot'),s=>Boolean(s.active),'default research action'));
+  const result=await finishAction(c);assert.equal(result.status,'BLOCKED',JSON.stringify(result.actions[0]));assert.equal(result.actions[0].localExecution.phase,'FAILED');assert.equal(result.actions[0].localExecution.workerExited,true);assert.match(JSON.stringify(result.actions[0]),/EGO_LITE_HOST_DISCONNECTED/);assert.equal(evidenceCount(c),0);
+  await remember(c,await c.rpc('snapshot'));const before=c.snapshot;assert.equal(before.events.length,0);assert.deepEqual(before.children.map(v=>v.role),['application','host']);
+  await c.post(c.base+'/'+c.cycle.id+'/advance',{});assert.equal((await c.rpc('snapshot')).children.length,2);await stop(c);
+  const clock=JSON.parse(fs.readFileSync(path.join(c.actionDirectory,'test-clock-probe.json'),'utf8'));assert.deepEqual(clock.steps.map(s=>s.offset),[-3600000]);assert.equal(clock.readyReleased,false);assert.equal(clock.originalReadyObserved,true);
+  const receipt=watchdogReceipt(c);assert.equal(receipt.reason,reason);assert.equal(receipt.phase,'QUIT');assert.equal(receipt.exitCode,0);
+  if(mode==='frozen-heartbeat'){assert.ok(receipt.gapMs>=5000&&receipt.gapMs<6500,JSON.stringify(receipt));assert.ok(c.receipt.watchdogProbe.writes>=10);assert.equal(c.receipt.watchdogProbe.lastPublished.sequence,0);}else assert.ok(receipt.gapMs<5000);
+  record(c);
+ });
  await check('normal capture remains usable and Douyin GET only shows an unconnected read-only snapshot',async()=>{
   const c=await open('normal-and-ops');
   for(const url of ['/douyin-ops','/projects/'+c.project.id+'/douyin']){const r=await c.request('GET',url);assert.equal(r.status,200);assert.ok(r.type.includes('text/html'));assert.ok(r.text.includes('Ego Lite 抖音只读运营'));assert.ok(r.text.includes('NOT_CONNECTED'));assert.ok(r.text.includes('尚未核验'));assert.ok(r.text.includes('返回项目工作台'));assert.ok(!r.text.includes('DOUYIN_OPS_FAILED'));assert.ok(!r.text.includes('id="launch-ops"'));}
