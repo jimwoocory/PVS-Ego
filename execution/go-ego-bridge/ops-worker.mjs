@@ -28,8 +28,10 @@ try{
   }else if(current!==destination)throw Error('SESSION_EXPIRED');
   const result=await page.evaluate(async input=>{
    const at=()=>new Date().toISOString(),blocked=status=>({status,source:input.source,checkedAt:at()});
+   let stage=input.operation==='identity'?'IDENTITY':'IDENTITY_BEFORE';
+   const fail=(status,reason,httpStatus)=>{throw Object.assign(Error(status),{reason,httpStatus});};
    const base=input.source==='LIVE_DOUYIN'?'':location.pathname;
-   const get=async url=>{const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),7000);try{const r=await fetch(url,{method:'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal:controller.signal});if(!r.ok)throw Error(r.status===401||r.status===403?'AUTH_REQUIRED':'PROVIDER_ERROR');const text=await r.text();if(text.length>2000000)throw Error('PROVIDER_ERROR');return JSON.parse(text);}finally{clearTimeout(timer);}};
+   const get=async url=>{const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),7000);try{const r=await fetch(url,{method:'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal:controller.signal});if(!r.ok)fail(r.status===401||r.status===403?'AUTH_REQUIRED':'PROVIDER_ERROR','HTTP_ERROR',r.status);const text=await r.text();if(text.length>2000000)fail('PROVIDER_ERROR','RESPONSE_TOO_LARGE');if(!text.trim())fail('PROVIDER_ERROR','EMPTY_RESPONSE');try{return JSON.parse(text);}catch{fail('PROVIDER_ERROR','INVALID_JSON');}}catch(error){if(error.reason)throw error;fail('PROVIDER_ERROR',error.name==='AbortError'?'TIMEOUT':'NETWORK_ERROR');}finally{clearTimeout(timer);}};
    const readIdentity=async()=>{
     const data=await get(input.source==='LIVE_DOUYIN'?'/aweme/v1/web/user/profile/self/?aid=6383':base+'/self');
     if(data.status_code!==0)throw Error('AUTH_REQUIRED');
@@ -44,7 +46,7 @@ try{
     if(user.uid!==input.expectedAccountUid)return blocked('ACCOUNT_CHANGED');
     if(!user.secUid)return blocked('DATA_UNAVAILABLE');
     const url=input.source==='LIVE_DOUYIN'?'/aweme/v1/web/aweme/post/?aid=6383&sec_user_id='+encodeURIComponent(user.secUid)+'&count='+input.count+'&max_cursor=0':base+'/works?count='+input.count;
-    const data=await get(url);
+    stage='WORKS';const data=await get(url);
     if(data.status_code!==0||!Array.isArray(data.aweme_list))return blocked('DATA_UNAVAILABLE');
     const works=[];const names={plays:'play_count',likes:'digg_count',comments:'comment_count',shares:'share_count',collects:'collect_count'};
     for(const raw of data.aweme_list.slice(0,input.count)){
@@ -54,9 +56,9 @@ try{
      let publishedAt=null;if(Number.isSafeInteger(raw.create_time)&&raw.create_time>0){const date=new Date(raw.create_time*1000);if(Number.isNaN(date.getTime()))return blocked('DATA_UNAVAILABLE');publishedAt=date.toISOString();}
      works.push({awemeId:String(raw.aweme_id),description:typeof raw.desc==='string'?raw.desc.slice(0,2000):'',publishedAt,author:{uid:user.uid,secUid:user.secUid,uniqueId:user.uniqueId,nickname:user.nickname},metrics,metricAvailability:availability,durationMs:raw.video.duration,coverUrl:'',externalUrl:'https://www.douyin.com/video/'+raw.aweme_id});
     }
-    const after=await readIdentity();if(after.uid!==user.uid)return blocked('ACCOUNT_CHANGED');
+    stage='IDENTITY_AFTER';const after=await readIdentity();if(after.uid!==user.uid)return blocked('ACCOUNT_CHANGED');
     return {status:'READY',source:input.source,checkedAt:at(),identity:after,works};
-   }catch(error){return blocked(['AUTH_REQUIRED','RISK_CONTROL'].includes(error.message)?error.message:'PROVIDER_ERROR');}
+   }catch(error){const reason=['HTTP_ERROR','RESPONSE_TOO_LARGE','EMPTY_RESPONSE','INVALID_JSON','TIMEOUT','NETWORK_ERROR'].includes(error.reason)?error.reason:'READ_FAILED';return {...blocked(['AUTH_REQUIRED','RISK_CONTROL'].includes(error.message)?error.message:'PROVIDER_ERROR'),failure:{stage,reason,...(Number.isInteger(error.httpStatus)&&error.httpStatus>=100&&error.httpStatus<=599?{httpStatus:error.httpStatus}:{})}};}
   },{source:c.source,operation:c.operation,expectedAccountUid:c.expectedAccountUid,count:c.count});
   const after=(await ego.listTaskSpaces()).taskSpaces.find(s=>s.id===c.binding.spaceId&&s.name===c.spaceName&&s.profileId==='Default');
   if(!after||after.ownership!=='agent')throw Error('CONTROL_USER');

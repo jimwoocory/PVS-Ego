@@ -352,3 +352,10 @@ Tabbit创建标签时协议拒绝，未执行页面操作，空闲空任务已�
 | R10 | GitHub账号的独立审核批准 | C5独立静态代码审查与F9复审已完成，首个CI已通过；仍未取得GitHub Approve，不能称正式批准或全部验收。当前head需看对应检查，本PR不合并部署 |
 
 原配置、DB、媒体、浏览器账号、日志、原始证据及私有历史不随清单提交。原守卫与默认真实执行拒绝保持；原服务不停止或重启。清单完成表示已登记上述复核范围和缺口，不表示 R1–R10 已完成。
+
+
+### C14 可见窗口与真实账号/作品读取
+
+公开集合仍163项；重新审查scripts/ego-lite-douyin-supervisor.mjs、execution/go-ego-bridge/ops-worker.mjs、src/application/ports/ego-lite-douyin-read.ts、src/adapters/douyin/ego-lite-douyin-read-runtime.ts、tests/ego-lite-douyin-read.test.mjs及五份本轮公开说明。F21修复运营宿主隐藏启动并要求固定shell可见回执；F22将读取失败限制为枚举阶段/原因及可选HTTP状态，响应原文/凭据不进入结果。只影响本仓库运营宿主，不接管用户Space或放宽网络策略。
+
+唯一专项最终16/16、退出0、34368.209ms；19个子进程正常退出，36个捕获PID消失，22次合成GET，21项源码摘要匹配。测试平台响应仍为合成；真实证据另行记录：用户看到窗口、手动登录/归还控制，实际身份READY；本人作品GET返回空响应，WORKS/EMPTY_RESPONSE、NOT_READ，未取得真实作品/指标。旧Go三个完整套件及其他历史未验收边界保留。
