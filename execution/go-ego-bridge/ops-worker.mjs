@@ -1,4 +1,4 @@
-// Fixed account/first-page read program. No caller-supplied script, URL, login,
+// Fixed account/confirmed-page read program. No caller-supplied script, URL, login,
 // signature generation, cookies, publication, reply or automatic control claim.
 const c=globalThis.PVS_EGO_OPS;
 const {stdout}=await import('node:process');
@@ -27,7 +27,7 @@ try{
    if(!new URL(current).pathname.startsWith('/user/'))await page.goto(destination,{waitUntil:'domcontentloaded',timeout:10000});
   }else if(current!==destination)throw Error('SESSION_EXPIRED');
   // The site owns its request construction. Observe only a fresh, bounded
-  // first-page response on this already-owned Page; never copy query secrets,
+  // confirmed-page response on this already-owned Page; never copy query secrets,
   // synthesize a signature, replay a captured URL or inspect request headers.
   const issue=(reason,httpStatus)=>Object.assign(Error('PROVIDER_ERROR'),{reason,httpStatus});
   const blocked=(stage,error)=>({...empty(['AUTH_REQUIRED','RISK_CONTROL'].includes(error.message)?error.message:'PROVIDER_ERROR'),failure:{stage,reason:['HTTP_ERROR','RESPONSE_TOO_LARGE','EMPTY_RESPONSE','INVALID_JSON','TIMEOUT','NETWORK_ERROR','NATIVE_REQUEST_NOT_OBSERVED','READ_FAILED'].includes(error.reason)?error.reason:'READ_FAILED',...(Number.isInteger(error.httpStatus)&&error.httpStatus>=100&&error.httpStatus<=599?{httpStatus:error.httpStatus}:{}),...(error.networkCode?{networkCode:error.networkCode}:{})}});
@@ -41,7 +41,7 @@ try{
     const text=await r.text();if(text.length>2000000)fail('PROVIDER_ERROR','RESPONSE_TOO_LARGE');if(!text.trim())fail('PROVIDER_ERROR','EMPTY_RESPONSE');
     let data;try{data=JSON.parse(text);}catch{fail('PROVIDER_ERROR','INVALID_JSON');}
     if(data.status_code!==0)fail('AUTH_REQUIRED','READ_FAILED');const u=data.user??data.data?.user;
-    if(!u||!/^[1-9]\d{0,39}$/.test(String(u.uid??'')))fail('AUTH_REQUIRED','READ_FAILED');
+    if(!u||typeof u.uid!=='string'&&!Number.isSafeInteger(u.uid)||!/^[1-9]\d{0,39}$/.test(String(u.uid??'')))fail('AUTH_REQUIRED','READ_FAILED');
     const str=(v,n)=>typeof v==='string'?v.slice(0,n):'';
     return {identity:{uid:String(u.uid),secUid:str(u.sec_uid,200),uniqueId:str(u.unique_id,100),shortId:str(u.short_id,100),nickname:str(u.nickname,100)}};
    }catch(error){return {status:['AUTH_REQUIRED','RISK_CONTROL'].includes(error.message)?error.message:'PROVIDER_ERROR',reason:['HTTP_ERROR','RESPONSE_TOO_LARGE','EMPTY_RESPONSE','INVALID_JSON','READ_FAILED'].includes(error.reason)?error.reason:error.name==='AbortError'?'TIMEOUT':'NETWORK_ERROR',...(Number.isInteger(error.httpStatus)?{httpStatus:error.httpStatus}:{})};}finally{clearTimeout(timer);}
@@ -51,7 +51,7 @@ try{
    const frame=(await page.cdp('Page.getFrameTree')).frameTree.frame.id;
    await page.cdp('Network.enable',{maxTotalBufferSize:4000000,maxResourceBufferSize:2000000});await page.events();
    let requestId,observed=false,finished=false,httpStatus;
-   const accept=p=>{try{const u=new URL(p.request.url);return p.frameId===frame&&p.request.method==='GET'&&!p.redirectResponse&&u.origin===(c.source==='LIVE_DOUYIN'?'https://www.douyin.com':c.base.origin)&&u.pathname===(c.source==='LIVE_DOUYIN'?'/aweme/v1/web/aweme/post/':'/bridge-fixture/'+c.base.nonce+'/works')&&u.searchParams.get('sec_user_id')===user.secUid&&u.searchParams.get('max_cursor')==='0'&&/^[1-9]\d?$/.test(u.searchParams.get('count')??'')&&Number(u.searchParams.get('count'))<=c.count;}catch{return false;}};
+   const accept=p=>{try{const u=new URL(p.request.url);return p.frameId===frame&&p.request.method==='GET'&&!p.redirectResponse&&u.origin===(c.source==='LIVE_DOUYIN'?'https://www.douyin.com':c.base.origin)&&u.pathname===(c.source==='LIVE_DOUYIN'?'/aweme/v1/web/aweme/post/':'/bridge-fixture/'+c.base.nonce+'/works')&&u.searchParams.get('sec_user_id')===user.secUid&&u.searchParams.getAll('max_cursor').length===1&&u.searchParams.get('max_cursor')===c.cursor&&u.searchParams.getAll('sec_user_id').length===1&&u.searchParams.getAll('count').length===1&&/^[1-9]\d?$/.test(u.searchParams.get('count')??'')&&Number(u.searchParams.get('count'))<=c.count;}catch{return false;}};
    const consume=async()=>{for(const e of await page.events()){const p=e.params??{};
     if(e.method==='Network.requestWillBeSent'){
      if(p.requestId===requestId&&p.redirectResponse)throw issue('NETWORK_ERROR');
@@ -64,8 +64,8 @@ try{
     }
    }};
    const deadline=Date.now()+7000;
-   if(c.source==='LIVE_DOUYIN')await page.reload({waitUntil:'domcontentloaded',timeout:7000});
-   else await page.evaluate(input=>{window.dispatchEvent(new CustomEvent('pvs-fixture-read',{detail:input}));},{count:c.count,secUid:user.secUid});
+   if(c.source==='LIVE_DOUYIN'){if(c.cursor==='0')await page.reload({waitUntil:'domcontentloaded',timeout:7000});else{const found=await page.evaluate(input=>{if(location.origin!=='https://www.douyin.com')return false;const a=[...document.querySelectorAll('a[href]')].find(a=>{try{const u=new URL(a.href);return u.origin===location.origin&&u.pathname==='/video/'+input.lastWorkId;}catch{return false;}});if(!a)return false;a.scrollIntoView({block:'end',behavior:'instant'});return true;},{lastWorkId:c.lastWorkId});if(!found)throw issue('NATIVE_REQUEST_NOT_OBSERVED');}}
+   else await page.evaluate(input=>{window.dispatchEvent(new CustomEvent('pvs-fixture-read',{detail:input}));},{count:c.count,secUid:user.secUid,cursor:c.cursor});
    while(Date.now()<deadline&&!finished){await consume();if(!finished)await new Promise(r=>setTimeout(r,50));}
    if(!finished)throw issue(observed?'TIMEOUT':'NATIVE_REQUEST_NOT_OBSERVED');
    const response=await page.cdp('Network.getResponseBody',{requestId},{timeout:2000});
@@ -82,17 +82,20 @@ try{
    else if(!user.secUid)result=empty('DATA_UNAVAILABLE');
    else{
     stage='WORKS';const data=await pageWorks(user);
-    if(data.status_code!==0||!Array.isArray(data.aweme_list)||data.aweme_list.length>c.count)result=empty('DATA_UNAVAILABLE');
+    const cursorValue=v=>typeof v==='string'&&/^(0|[1-9]\d{0,19})$/.test(v)?v:Number.isSafeInteger(v)&&v>=0?String(v):null;
+    const hasMore=data.has_more===1||data.has_more===true,nextCursor=cursorValue(data.max_cursor);
+    const pageValid=[0,1,false,true].includes(data.has_more)&&nextCursor!==null&&(!hasMore||(nextCursor!=='0'&&nextCursor!==c.cursor&&data.aweme_list?.length>0));
+    if(data.status_code!==0||!pageValid||!Array.isArray(data.aweme_list)||data.aweme_list.length>c.count)result=empty('DATA_UNAVAILABLE');
     else{
      const works=[],names={plays:'play_count',likes:'digg_count',comments:'comment_count',shares:'share_count',collects:'collect_count'};let invalid=false;
      for(const raw of data.aweme_list){
-      if(!/^\d{8,30}$/.test(String(raw.aweme_id??''))||String(raw.author?.uid??'')!==user.uid||!Number.isSafeInteger(raw.video?.duration)||raw.video.duration<0){invalid=true;break;}
+      if(typeof raw.aweme_id!=='string'||!/^\d{8,30}$/.test(raw.aweme_id)||String(raw.author?.uid??'')!==user.uid||!Number.isSafeInteger(raw.video?.duration)||raw.video.duration<0){invalid=true;break;}
       const metrics={},availability={};for(const [key,name]of Object.entries(names)){const v=raw.statistics?.[name];if(Number.isSafeInteger(v)&&v>=0){metrics[key]=v;availability[key]='OBSERVED';}else availability[key]=v===-1?'NOT_VISIBLE':'NOT_PROVIDED';}
       let publishedAt=null;if(Number.isSafeInteger(raw.create_time)&&raw.create_time>0){const date=new Date(raw.create_time*1000);if(Number.isNaN(date.getTime())){invalid=true;break;}publishedAt=date.toISOString();}
       works.push({awemeId:String(raw.aweme_id),description:typeof raw.desc==='string'?raw.desc.slice(0,2000):'',publishedAt,author:{uid:user.uid,secUid:user.secUid,uniqueId:user.uniqueId,nickname:user.nickname},metrics,metricAvailability:availability,durationMs:raw.video.duration,coverUrl:'',externalUrl:'https://www.douyin.com/video/'+raw.aweme_id});
      }
      if(invalid)result=empty('DATA_UNAVAILABLE');
-     else{stage='IDENTITY_AFTER';const afterUser=await freshIdentity();result=afterUser.uid!==user.uid?empty('ACCOUNT_CHANGED'):{...empty('READY'),identity:afterUser,works,readMethod:'PAGE_RESPONSE'};}
+     else{stage='IDENTITY_AFTER';const afterUser=await freshIdentity();result=afterUser.uid!==user.uid?empty('ACCOUNT_CHANGED'):{...empty('READY'),identity:afterUser,works,readMethod:'PAGE_RESPONSE',pagination:{requestCursor:c.cursor,nextCursor:hasMore?nextCursor:null,hasMore}};}
     }
    }
   }catch(error){result=blocked(stage,error);}

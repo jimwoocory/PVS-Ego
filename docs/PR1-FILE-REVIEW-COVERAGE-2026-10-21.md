@@ -366,3 +366,13 @@ Tabbit创建标签时协议拒绝，未执行页面操作，空闲空任务已�
 集合仍163项。重新审查execution/go-ego-bridge/ops-worker.mjs、src/adapters/douyin/ego-lite-douyin-read-runtime.ts、src/application/ports/ego-lite-douyin-read.ts、tests/ego-lite-douyin-read.test.mjs及五份公开说明。F23删除失效自拼作品请求，原SDK只接受当前Page新事件中本人/第一页/有界条数固定GET响应，不复制请求URL/凭据或生成签名；读前后身份、作者、响应体上限、无新响应不复用/不回退以及PAGE_RESPONSE业务schema核验。原网络策略/宿主源及人工门禁不变。
 
 唯一专项最终19/19、退出0、72073.0328ms，29子进程退出0、56捕获PID消失、36合成GET、21源码SHA匹配。负例拒绝其他账号、后续页、超量和外来作者，无新请求不拼接/复用；两次9/2及中间16/16分开保留。实际独立会话读取5条本人作品/25个返回指标值，双运营页面回显、原Agent确认/worker退出/租约释放及不可变证据SHA/归属核验。真实资料仅留本地。旧Go完整套件、完整原生点击/视觉和其他历史未验收边界继续保留。
+
+
+### C16 分页确认、游标与只读指标
+
+公开集合仍163项。复查execution/go-ego-bridge/ops-worker.mjs、ops.go、scripts/ego-lite-douyin-supervisor.mjs、ego-lite-supervisor.mjs、src/adapters/douyin/ego-lite-douyin-read-runtime.ts、src/application/ports/ego-lite-douyin-read.ts、src/application/services/pvs-agent-capabilities.ts、src/web/ego-lite-douyin-ui.ts、tests/ego-lite-douyin-read.test.mjs及五份公开说明，共14候选文件。F24逐页具体确认/当前项目账号/随机上页回执/十进制游标/5页上限/两分钟/重复进度与作品；F25长ID精度及异常指标处理。原DB活租约、版本/上下文、取消/幂等和网络策略不放松。
+
+真实重验5作品/25返回指标、无后续，双运营页及不可变证据/租约/worker核验，确认后的伪造续页在Go前拒绝。真实第二页滚动、预取/虚拟列表未观察；只读合成多页和真实终页分别记录。17/2、27/27中间与21/2宿主退出失败保留，新增安全退出原因回执；最终定向结果见分轮记录。历史未验收边界不撤销。
+
+
+C16最终构建/离线Go编译退出0，唯一test:ego-lite-douyin-read最终 **29 PASS/0 FAIL（28子项及父项）、退出0、229839.1216ms**。实际Go/CLI/SDK/Ego、新SQLite/Prisma/原Agent参与；网站响应全为合成。五页确认链、结束/上限、跨项目/旧回执/账号变化/循环游标/跨页重复、长ID及异常指标、第二页中断与取消通过；两分钟自然到期子项121931.1693ms，含至少120000ms实际等待且没有新网站读取。62个记录子进程正常退出、122个捕获PID消失、107次合成GET、21源码摘要匹配；两次宿主收尾均STOP_REQUESTED。最终中断/恢复通过不解释或撤销前轮未归因的宿主退出，长期稳定性仍待验收。

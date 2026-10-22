@@ -105,7 +105,7 @@ export async function startWorkbench({env,installation=loadInstallation(),opsFix
       const row=db.prepare('SELECT projectId,status,dataJson,leasePid,leaseOwner FROM AgentCycleRecord WHERE id=?').get(r.scope.cycleId);
       if(!row||row.projectId!==r.scope.projectId||row.status!=='RUNNING'||row.leasePid!==app.p.pid||!row.leaseOwner)throw Error('EGO_OPS_LEASE_DENIED');
       const cycle=JSON.parse(row.dataJson),a=cycle.actions.find(a=>a.id===r.scope.actionId),key=actionKey(r.scope);
-      if(stopping||!cycle.input.stages.includes('OPERATIONS')||!a||a.status!=='RUNNING'||a.effect!=='HUMAN_DECISION'||a.capabilityId!=='operations.ego-lite-'+r.operation||!a.confirmedAt||a.contextHash!==r.scope.contextHash||a.input.epoch!==opsEpoch||a.localExecution?.phase==='CANCELLING'||a.input.expectedAccountUid!==r.expectedAccountUid||a.input.count!==r.count||opsScopes.has(key)||opsScopes.size>=256)throw Error('EGO_OPS_ACTION_DENIED');
+      if(stopping||!cycle.input.stages.includes('OPERATIONS')||!a||a.status!=='RUNNING'||a.effect!=='HUMAN_DECISION'||a.capabilityId!=='operations.ego-lite-'+r.operation||!a.confirmedAt||a.contextHash!==r.scope.contextHash||a.input.epoch!==opsEpoch||a.localExecution?.phase==='CANCELLING'||a.input.expectedAccountUid!==r.expectedAccountUid||a.input.count!==r.count||a.input.cursor!==r.cursor||a.input.expectedPageToken!==r.expectedPageToken||opsScopes.has(key)||opsScopes.size>=256)throw Error('EGO_OPS_ACTION_DENIED');
       opsScopes.add(key);const reply=await ops.execute(r);send({egoOpsReply:{id:r.id,reply}});
     }catch(error){send({egoOpsReply:{id:r?.id,error:/^EGO_[A-Z_]+$/.test(error.message)?error.message:'EGO_OPS_FAILED'}});}})();return;}
     if(message?.egoLiteRequest){void(async()=>{

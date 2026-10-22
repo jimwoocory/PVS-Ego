@@ -222,9 +222,9 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
   private install() {
     for(const operation of ["open","identity","works"] as const){
       const label={open:"打开独立抖音登录会话",identity:"核验 Ego Lite 当前抖音账号",works:"读取已核验账号的本人作品指标"}[operation];
-      const schema=operation==="works"?z.object({epoch:z.string().min(1).max(120),expectedAccountUid:z.string().regex(/^[1-9]\d{0,39}$/),count:z.number().int().min(1).max(20)}).strict():z.object({epoch:z.string().min(1).max(120)}).strict();
-      this.add({id:"operations.ego-lite-"+operation,title:label,description:"具体确认后通过独立 Ego Lite 执行；只读本人账号/第一页作品，不发布、不回复、不调用模型。",stage:"OPERATIONS",effect:"HUMAN_DECISION",inputSchema:schema,
-        preview:async(projectId,input)=>{const port=this.d.egoLiteDouyinRead;if(!port||port.peek().epoch!==input.epoch)throw new DomainValidationError("当前 Ego Lite 运营会话已变化或未配置，请重新准备");return JSON.stringify({projectId,operation:label,source:port.peek().source,url:port.peek().source==="LIVE_DOUYIN"?"https://www.douyin.com/user/self":"本机合成夹具",...input,limits:"不读取其他账号、不翻页、不发布、不回复；登录与控制归还由用户手动完成"},null,2);},
+      const schema=operation==="works"?z.object({epoch:z.string().min(1).max(120),expectedAccountUid:z.string().regex(/^[1-9]\d{0,39}$/),count:z.number().int().min(1).max(20),cursor:z.string().regex(/^(0|[1-9]\d{0,19})$/).default("0"),expectedPageToken:z.string().regex(/^[a-f0-9]{64}$/).optional()}).strict():z.object({epoch:z.string().min(1).max(120)}).strict();
+      this.add({id:"operations.ego-lite-"+operation,title:label,description:"具体确认后通过独立 Ego Lite 执行；只读本人账号/已确认单页作品，不发布、不回复、不调用模型。",stage:"OPERATIONS",effect:"HUMAN_DECISION",inputSchema:schema,
+        preview:async(projectId,input)=>{const port=this.d.egoLiteDouyinRead;if(!port||port.peek().epoch!==input.epoch)throw new DomainValidationError("当前 Ego Lite 运营会话已变化或未配置，请重新准备");return JSON.stringify({projectId,operation:label,source:port.peek().source,url:port.peek().source==="LIVE_DOUYIN"?"https://www.douyin.com/user/self":"本机合成夹具",...input,limits:"每页单独确认，绑定上页回执及游标；每页最多20条，每条链最多5页，不读取其他账号、不发布、不回复；登录与控制归还由用户手动完成"},null,2);},
         run:async(context,input)=>{const port=this.d.egoLiteDouyinRead;if(!port)throw new DomainValidationError("Ego Lite 运营读取器尚未配置");
           const value=await port.perform(context,{...input,operation} as EgoDouyinReadInput);
           const artifact=await this.record(context,"EGO_LITE_DOUYIN_READ",value as unknown as Record<string,unknown>);
@@ -670,7 +670,7 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
         cid: comment.cid, parentCid: comment.parentCid, contentHash: comment.contentHash, text: comment.text } : null };
     }
     return hashValue({ workspace, ...(capabilityId==="research.collect-evidence"?{egoLiteSourceUrl:this.d.ownedEgoLiteSourceUrl}:{}), production: runs.map(run => ({ id: run.id, projectId: run.projectId, revision: run.revision })).sort((a, b) => a.id.localeCompare(b.id)), final,
-      ...(egoDouyin?{egoDouyin:{epoch:egoDouyin.epoch,uid:egoDouyin.identity?.uid,checkedAt:egoDouyin.checkedAt}}:{}),publication: { preference, packages: packages.map(p => ({ id: p.id, status: p.status, providerType: p.providerType, title: p.titleDraft, description: p.descriptionDraft,
+      ...(egoDouyin?{egoDouyin:{epoch:egoDouyin.epoch,uid:egoDouyin.identity?.uid,checkedAt:egoDouyin.checkedAt,pagination:egoDouyin.pagination}}:{}),publication: { preference, packages: packages.map(p => ({ id: p.id, status: p.status, providerType: p.providerType, title: p.titleDraft, description: p.descriptionDraft,
         finalAssemblyId: p.finalAssemblyId, finalArtifactId: p.finalArtifactId, finalArtifactHash: p.finalArtifactHash })), receipts }, binding, feedback, reply });
   }
   async validateCompletion(projectId: string, stages: BusinessStage[], supplied: CycleEvidence[]) {

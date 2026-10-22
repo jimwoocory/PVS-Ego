@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -25,6 +26,8 @@ type opsConfig struct {
 	Scope       scope           `json:"scope"`
 	ExpectedUID string          `json:"expectedAccountUid,omitempty"`
 	Count       int             `json:"count,omitempty"`
+	Cursor      string          `json:"cursor,omitempty"`
+	LastWorkID  string          `json:"lastWorkId,omitempty"`
 }
 type opsOutput struct{ bytes []byte }
 
@@ -56,7 +59,7 @@ func opsMain(file string) int {
 	if e == nil && (!strings.HasPrefix(c.SpaceName, "pvs-ops-") || !identifier.MatchString(c.SpaceName) || !identifier.MatchString(c.Scope.ProjectID) || !identifier.MatchString(c.Scope.CycleID) || !identifier.MatchString(c.Scope.ActionID) || !shaPattern.MatchString(c.Scope.ContextHash)) {
 		e = fmt.Errorf("OPS_SCOPE_DENIED")
 	}
-	if e == nil && ((c.Operation == "works" && (c.Count < 1 || c.Count > 20 || len(c.ExpectedUID) < 1 || len(c.ExpectedUID) > 40)) || (c.Operation != "works" && (c.Count != 0 || c.ExpectedUID != ""))) {
+	if e == nil && ((c.Operation == "works" && (!regexp.MustCompile(`^(0|[1-9]\d{0,19})$`).MatchString(c.Cursor) || (c.Cursor == "0" && c.LastWorkID != "") || (c.Cursor != "0" && !regexp.MustCompile(`^\d{8,30}$`).MatchString(c.LastWorkID)) || c.Count < 1 || c.Count > 20 || len(c.ExpectedUID) < 1 || len(c.ExpectedUID) > 40)) || (c.Operation != "works" && (c.Count != 0 || c.ExpectedUID != "" || c.Cursor != "" || c.LastWorkID != ""))) {
 		e = fmt.Errorf("OPS_ARGUMENT_DENIED")
 	}
 	if e == nil && ((c.Operation == "open" && c.Binding != nil) || (c.Operation != "open" && (c.Binding == nil || c.Binding.InstanceID != c.Base.InstanceID || c.Binding.SpaceName != c.SpaceName || c.Binding.ProfileID != "Default" || c.Binding.SpaceID < 1 || c.Binding.TargetID == ""))) {
