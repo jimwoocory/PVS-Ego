@@ -10,13 +10,29 @@ export function localFile(file){
   if(typeof file!=='string'||!path.isAbsolute(file)||fs.realpathSync(file)!==file||!fs.lstatSync(file).isFile()||fs.statSync(file).nlink!==1)throw Error('EGO_LITE_PHYSICAL_FILE_REQUIRED');
   return file;
 }
-export function loadInstallation(file=installationFile){
+function readInstallation(file){
   confined(file,path.join(root,'.runtime'));
   const value=JSON.parse(fs.readFileSync(localFile(file),'utf8'));
   if(value.contract!=='pvs-ego-lite-owned-workbench-v1'||value.root!==root||value.platform!==process.platform||value.node!==process.execPath||!Array.isArray(value.pins)||value.pins.length<6)throw Error('EGO_LITE_INSTALLATION_INVALID');
   confined(value.bridge,path.join(root,'.runtime'));
   const required=[value.node,value.bridge,value.cli,value.sdk,value.electron,value.hostMain,...bridgeSources.map(p=>path.join(root,p))];
   if(new Set(value.pins.map(p=>p.file)).size!==value.pins.length||required.some(file=>!value.pins.some(p=>p.file===file)))throw Error('EGO_LITE_PIN_MISSING');
-  for(const pin of value.pins)if(!/^[a-f0-9]{64}$/.test(pin.sha256)||digest(localFile(pin.file))!==pin.sha256)throw Error('EGO_LITE_PIN_CHANGED');
   return value;
+}
+export function loadInstallation(file=installationFile){
+ const value=readInstallation(file);
+ for(const pin of value.pins)if(!/^[a-f0-9]{64}$/.test(pin.sha256)||digest(localFile(pin.file))!==pin.sha256)throw Error('EGO_LITE_PIN_CHANGED');
+ return value;
+}
+export async function loadInstallationAsync(file=installationFile){
+ const value=readInstallation(file),manifest=fs.readFileSync(file,'utf8');
+ for(const pin of value.pins){
+  if(!/^[a-f0-9]{64}$/.test(pin.sha256))throw Error('EGO_LITE_PIN_CHANGED');
+  const physical=localFile(pin.file),before=fs.statSync(physical),hash=createHash('sha256');
+  for await(const chunk of fs.createReadStream(physical,{highWaterMark:262144}))hash.update(chunk);
+  const after=fs.statSync(localFile(physical));
+  if(before.ino!==after.ino||before.dev!==after.dev||before.size!==after.size||before.mtimeMs!==after.mtimeMs||hash.digest('hex')!==pin.sha256)throw Error('EGO_LITE_PIN_CHANGED');
+ }
+ if(fs.readFileSync(localFile(file),'utf8')!==manifest||JSON.stringify(readInstallation(file))!==JSON.stringify(value))throw Error('EGO_LITE_INSTALLATION_CHANGED');
+ return value;
 }

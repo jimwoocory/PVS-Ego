@@ -19,18 +19,21 @@ const messages:Record<string,string>={NOT_CONNECTED:"尚未打开本仓库的独
 export class EgoLiteDouyinReadRuntime implements EgoLiteDouyinReadPort {
   private state:EgoDouyinSnapshot;
   private busy=false;
+  private hostGeneration=0;
   private chainProject?:string;
   private seenIds=new Set<string>();
   constructor(readonly epoch:string,private readonly execute:(context:AgentCapabilityContext,input:EgoDouyinReadInput)=>Promise<{workerExited:boolean;terminal:string;result?:unknown}>,source:EgoDouyinSnapshot["source"]="LIVE_DOUYIN"){
     this.state={epoch,status:"NOT_CONNECTED",message:messages.NOT_CONNECTED!,source,works:[],coverage:"NOT_READ"};
   }
   peek(){return structuredClone(this.state);}
+  hostDisconnected(){this.hostGeneration++;this.chainProject=undefined;this.seenIds.clear();this.state={epoch:this.epoch,status:"SESSION_EXPIRED",message:messages.SESSION_EXPIRED!,source:this.state.source,works:[],coverage:"NOT_READ"};}
   async perform(context:AgentCapabilityContext,input:EgoDouyinReadInput){
     if(!context.confirmed||!context.localExecution||input.epoch!==this.epoch)throw new DouyinOpsRuntimeError("STALE_CONFIRMATION","需要当前会话的具体动作确认");
     if(this.busy)throw new DouyinOpsRuntimeError("BUSY","本机运营动作仍在执行");
     if(input.operation==="works"&&(!input.expectedAccountUid||input.expectedAccountUid!==this.state.identity?.uid))throw new DouyinOpsRuntimeError("ACCOUNT_CHANGED","请先核验并确认具体账号 UID");
     const requestCursor=input.cursor??"0",previous=this.state;
     if(input.operation==="works"){if(requestCursor==="0"&&input.expectedPageToken!==undefined||requestCursor!=="0"&&(!previous.pagination?.nextAllowed||previous.pagination.nextCursor!==requestCursor||previous.pagination.readToken!==input.expectedPageToken||this.chainProject!==context.projectId||!previous.worksCheckedAt||Date.now()-Date.parse(previous.worksCheckedAt)>120000))throw new DouyinOpsRuntimeError("STALE_PAGE","下一页需要当前项目、上页回执及游标的具体确认；请重新准备");}
+    const hostGeneration=this.hostGeneration;
     this.busy=true;
     // Clear visible/cached account data before any new live observation. A failed
     // read must not leave the previous account looking current.
@@ -40,6 +43,7 @@ export class EgoLiteDouyinReadRuntime implements EgoLiteDouyinReadPort {
       const reply=await this.execute(context,{...input,...(input.operation==="works"?{cursor:requestCursor}:{})});
       const phase=reply.terminal==="CANCELLED"?"CANCELLED":reply.terminal==="TIMED_OUT"?"TIMED_OUT":reply.terminal==="SUCCEEDED"?"SUCCEEDED":"FAILED";
       context.localExecution.report({phase,samples:0,workerExited:reply.workerExited===true});
+      if(hostGeneration!==this.hostGeneration)throw new DouyinOpsRuntimeError("SESSION_EXPIRED","宿主在本次动作期间退出，旧结果不能恢复许可");
       if(reply.workerExited&&["CANCELLED","TIMED_OUT"].includes(reply.terminal)){
         this.state={epoch:this.epoch,status:reply.terminal,message:reply.terminal==="CANCELLED"?"本次只读动作已取消，工作进程退出已确认；没有自动重试。":"本次只读动作已超时，工作进程退出已确认；没有自动重试。",source:this.state.source,checkedAt:new Date().toISOString(),works:[],coverage:"NOT_READ"};return this.peek();
       }

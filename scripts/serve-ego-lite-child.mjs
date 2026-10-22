@@ -4,13 +4,14 @@ import './isolation-guard.mjs';
 import {randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-const pending=new Map(),finishes=new Map(),opsPending=new Map();let launch,server,dbClient,deps,closing=false;
+const pending=new Map(),finishes=new Map(),opsPending=new Map();let launch,server,dbClient,deps,closing=false,opsRuntime;
 let shutdownPhase='RUNNING';
 const diagnostic=extra=>{try{fs.writeFileSync(path.join(process.env.TMP,'ego-lite-child-shutdown.json'),JSON.stringify({phase:shutdownPhase,...extra}));}catch{}};
 process.on('uncaughtExceptionMonitor',error=>diagnostic({error:error.message,stack:error.stack}));
 process.once('exit',code=>diagnostic({exitCode:code}));
 process.on('message',message=>{
   if(message?.egoLiteInit&&!launch){launch=message.egoLiteInit;return;}
+  if(message?.egoOpsHostClosed){opsRuntime?.hostDisconnected();return;}
   if(message?.egoOpsReply){const r=message.egoOpsReply,p=opsPending.get(r.id);if(p){opsPending.delete(r.id);p.cleanup();r.error?p.reject(Error(r.error)):p.resolve(r.reply);}return;}
   if(message?.egoLiteEvent){const e=message.egoLiteEvent,p=pending.get(e.id);if(!p)return;p.events.push(e);if(e.type==='connected')p.context.localExecution?.report({phase:'CONNECTED',samples:0,workerExited:false});
     if(['succeeded','failed','timed_out','cancelled','rejected'].includes(e.type)){pending.delete(e.id);p.cleanup();p.resolve(p.events);}return;}
@@ -37,7 +38,7 @@ const finish=(scope,runId)=>new Promise((resolve,reject)=>{
   if(!process.connected){reject(Error('EGO_LITE_SUPERVISOR_DISCONNECTED'));return;}
   const id=randomUUID(),timer=setTimeout(()=>{finishes.delete(id);reject(Error('EGO_LITE_FINISH_TIMEOUT'));},35000);finishes.set(id,{resolve,reject,timer});send({egoLiteFinish:{id,scope,runId}});
 });
-const opsRuntime=new EgoLiteDouyinReadRuntime(launch.opsEpoch,(context,input)=>new Promise((resolve,reject)=>{
+opsRuntime=new EgoLiteDouyinReadRuntime(launch.opsEpoch,(context,input)=>new Promise((resolve,reject)=>{
   if(!context.localExecution||context.localExecution.signal.aborted||!process.connected){reject(Error('EGO_OPS_ACTION_CANCELLED'));return;}
   const id=randomUUID(),cancel=()=>{if(process.connected)send({egoOpsCancel:{id}});};
   const timer=setTimeout(()=>{opsPending.delete(id);cancel();cleanup();reject(Error('EGO_OPS_TIMEOUT'));},65000);

@@ -7,7 +7,7 @@ import {createInterface} from 'node:readline';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {root,confined,assertEnvironment} from './isolation-policy.mjs';
-import {digest,loadInstallation} from './ego-lite-installation.mjs';
+import {digest,loadInstallation,loadInstallationAsync} from './ego-lite-installation.mjs';
 import {createDouyinReadSupervisor} from './ego-lite-douyin-supervisor.mjs';
 
 const terminal=new Set(['succeeded','failed','timed_out','cancelled','rejected']);
@@ -36,7 +36,7 @@ export async function startWorkbench({env,installation=loadInstallation(),opsFix
   const children=[],events=[],completedScopes=new Set();let active,stopping=false,stopPromise;
   const app=child(process.execPath,[path.join(root,'scripts/serve-ego-lite-child.mjs')],env,true);children.push(app);
   if(opsFixture){const u=new URL(opsFixture.origin);if(u.protocol!=='http:'||u.hostname!=='127.0.0.1'||!u.port||u.pathname!=='/'||u.search||u.hash||u.username||u.password||!id(opsFixture.nonce))throw Error('LOCAL_OPS_FIXTURE_REQUIRED');}
-  const ops=createDouyinReadSupervisor({env,installation,origin,nonce,fixture:opsFixture}),opsEpoch=fingerprint+':'+nonce,opsScopes=new Set();
+  const ops=createDouyinReadSupervisor({env,installation,origin,nonce,fixture:opsFixture,onHostClosed:event=>send({egoOpsHostClosed:event})}),opsEpoch=fingerprint+':'+nonce,opsScopes=new Set();
   const send=value=>{if(app.p.connected)app.p.send(value,()=>{});};
   function permit(request){
     if(!request||request.op!=='start'||!id(request.id)||!['session-open','session-read'].includes(request.mode)||request.timeoutMs!==10000||!id(request.researchRunId)||!request.scope||!id(request.scope.projectId)||!id(request.scope.cycleId)||!id(request.scope.actionId)||!(/^[a-f0-9]{64}$/.test(request.scope.contextHash)))throw Error('EGO_LITE_REQUEST_DENIED');
@@ -54,7 +54,7 @@ export async function startWorkbench({env,installation=loadInstallation(),opsFix
     const local=active={key,runId,pending:new Map(),waitingIds:new Set(),ids:new Set(),requests:0,cancelled:false,dir:path.join(session,'go-bridge-action-'+randomUUID())};
     fs.mkdirSync(local.dir,{recursive:true});fs.mkdirSync(path.join(local.dir,'evidence'));
     local.ready=(async()=>{
-      if(JSON.stringify(loadInstallation())!==JSON.stringify(installation)||digest(path.join(root,'.runtime/ego-lite-installation.json'))!==fingerprint)throw Error('EGO_LITE_INSTALLATION_CHANGED');
+      if(JSON.stringify(await loadInstallationAsync())!==JSON.stringify(installation)||digest(path.join(root,'.runtime/ego-lite-installation.json'))!==fingerprint)throw Error('EGO_LITE_INSTALLATION_CHANGED');
       const stop=path.join(local.dir,'stop'),entry=path.join(local.dir,'host.mjs'),heartbeat=path.join(local.dir,'supervisor-heartbeat');local.stopFile=stop;
       fs.writeFileSync(heartbeat,String(process.pid));local.heartbeat=setInterval(()=>{try{fs.writeFileSync(heartbeat,String(process.pid));}catch{clearInterval(local.heartbeat);}},500);
       fs.writeFileSync(entry,`import {app} from 'electron';import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';app.on('session-created',s=>{s.webRequest.onBeforeRequest((d,cb)=>{let allow=false;try{const u=new URL(d.url);if(u.protocol==='file:'){const rel=path.relative(${JSON.stringify(path.dirname(installation.hostMain))},fileURLToPath(u));allow=rel!==''&&!rel.startsWith('..')&&!path.isAbsolute(rel);}else allow=u.href==='about:blank'||(d.method==='GET'&&u.href===${JSON.stringify(sourceUrl)});}catch{}cb({cancel:!allow});});s.on('will-download',(event,item)=>{event.preventDefault();item.cancel();});});const parentAlive=()=>{try{process.kill(${process.pid},0);return Date.now()-fs.statSync(${JSON.stringify(heartbeat)}).mtimeMs<5000;}catch{return false;}};const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(stop)})||!parentAlive()){clearInterval(timer);app.quit();}},100);await import(${JSON.stringify(pathToFileURL(installation.hostMain).href)});`);
