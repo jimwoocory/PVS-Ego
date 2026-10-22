@@ -28,7 +28,7 @@ export class DouyinCollectionService {
     return binding;
   }
 
-  async start(raw: DouyinCollectionStart): Promise<DouyinCollectionRun> {
+  async start(raw: DouyinCollectionStart, beforeReadOrPersist?:()=>Promise<void>,writeFence?:import("../ports/operations-write-fence.js").OperationsWriteFence): Promise<DouyinCollectionRun> {
     const input = douyinCollectionStartSchema.parse(raw);
     const binding = input.bindingId ? await this.ops.findWorkBindingById(input.bindingId)
       : await this.ops.latestWorkBinding(input.projectId, { preferBound: true });
@@ -48,13 +48,26 @@ export class DouyinCollectionService {
       partial: false, truncated: false, revision: 1, visitedCursors: ["0"], retryable: true,
       createdAt: now, updatedAt: now }));
     // A repeated request key returns its checkpoint, never schedules a second batch.
-    return created.created ? this.advance({ projectId: input.projectId, runId: created.run.id }) : created.run;
+    return created.created ? this.advance({ projectId: input.projectId, runId: created.run.id,beforeReadOrPersist,writeFence }) : created.run;
   }
 
   async get(projectId: string, runId: string) { return this.runs.get(projectId, runId); }
   async list(projectId: string) { return this.runs.list(projectId); }
+  async findByRequestKey(projectId:string,key:string){
+    if(!this.runs.findByRequestKey)throw new DomainValidationError("缺少原采集请求查询能力，不自动重建任务");
+    return this.runs.findByRequestKey(projectId,key);
+  }
+  async resumeAfterHuman(input:{projectId:string;runId:string;expectedRevision:number;opsAccountUid:string}){
+    const run=await this.runs.get(input.projectId,input.runId);
+    if(!run||run.revision!==input.expectedRevision||run.opsAccountUid!==input.opsAccountUid)throw new DomainValidationError("原采集范围或版本已变化");
+    const binding=await this.scope(run);
+    if(await this.comments.accountForBinding(binding)!==input.opsAccountUid||!this.runs.resumeAfterHuman)throw new DomainValidationError("原采集账号或续接能力不可核验");
+    const result=await this.runs.resumeAfterHuman(input.projectId,run.id,run.revision,new Date().toISOString());
+    if(!result)throw new DomainValidationError("原采集暂不可续接，请重新核对最新版本");
+    return result;
+  }
 
-  async advance(input: { projectId: string; runId: string }): Promise<DouyinCollectionRun> {
+  async advance(input: { projectId: string; runId: string; beforeReadOrPersist?:()=>Promise<void>;writeFence?:import("../ports/operations-write-fence.js").OperationsWriteFence }): Promise<DouyinCollectionRun> {
     let run = await this.runs.get(input.projectId, input.runId);
     if (!run) throw new DomainValidationError("当前项目中找不到采集任务");
     if (run.status === "COMPLETED" || (run.status === "BLOCKED" && !run.retryable)) return run;
@@ -69,10 +82,11 @@ export class DouyinCollectionService {
     run = claimed;
     try {
       for (let page = 0; page < run.batchPages && run.hasMore; page++) {
+        await input.beforeReadOrPersist?.();
         const binding=await this.scope(run);
         if(!run.opsAccountUid||binding.opsAccountUid!==run.opsAccountUid)throw new DomainValidationError("采集任务缺少原账号 UID 或绑定已变化；保留游标，不自动重绑");
         const request = { projectId: run.projectId, bindingId: run.bindingId, awemeId: run.awemeId,
-          cursor: run.cursor, maxPages: 1, pageSize: run.pageSize,beforePersist:async()=>{const latest=await this.runs.get(run!.projectId,run!.id);if(!latest||latest.revision!==run!.revision||Date.parse(latest.leaseExpiresAt??"")<=Date.now())throw new DomainValidationError("采集租约或版本已变化，旧执行器不得写入评论");} };
+          cursor: run.cursor, maxPages: 1, pageSize: run.pageSize,writeFence:input.writeFence,beforePersist:async()=>{await input.beforeReadOrPersist?.();const latest=await this.runs.get(run!.projectId,run!.id);if(!latest||latest.revision!==run!.revision||Date.parse(latest.leaseExpiresAt??"")<=Date.now())throw new DomainValidationError("采集租约或版本已变化，旧执行器不得写入评论");} };
         const result = run.parentCid ? await this.comments.syncReplies({ ...request, cid: run.parentCid })
           : await this.comments.syncComments(request);
         const cyclic = result.hasMore && run.visitedCursors.includes(result.cursor);

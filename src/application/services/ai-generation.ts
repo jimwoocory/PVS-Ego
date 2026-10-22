@@ -24,6 +24,7 @@ import {
   DomainValidationError
 } from "../../domain/validation.js";
 import { referenceVideoProfileForPrompt, REFERENCE_VIDEO_EVIDENCE_INSTRUCTIONS, assertReferenceVideoInputBinding } from "./reference-video-analysis.js";
+import { referenceVideoEvidenceRuntime, type ReferenceVideoEvidenceVerifier } from "./reference-video-evidence.js";
 import { UsageComplianceService } from "./usage-compliance.js";
 import { isScriptDurationWithinTolerance } from "./script-narrative-timing.js";
 import type { CreativeProductionContext } from "../../domain/smart-generation.js";
@@ -216,7 +217,8 @@ export class AiGenerationService {
   constructor(
     private readonly runtime: StructuredAiRuntime,
     private readonly references?: CreativeReferenceGuard,
-    private readonly loadDouyinCreativeFeedback?: DouyinCreativeFeedbackLoader
+    private readonly loadDouyinCreativeFeedback?: DouyinCreativeFeedbackLoader,
+    private readonly verifyReferenceVideo?: ReferenceVideoEvidenceVerifier
   ) {
     this.usageCompliance = new UsageComplianceService(runtime);
   }
@@ -234,11 +236,16 @@ export class AiGenerationService {
     truth: ProductTruth;
     stageLabel: string;
     factGroups: (proposal: T) => string[][];
+    referenceVideoProfile?: ReferenceVideoProfile | null;
+    verifyContext?: () => Promise<void>;
   }): Promise<{ proposal: T; generation: StructuredAiResult }> {
+    const runtime=referenceVideoEvidenceRuntime(this.runtime,input.referenceVideoProfile,input.truth.projectId,this.verifyReferenceVideo);
+    await input.verifyContext?.();
     const firstGeneration = await generateStructuredJson(
-      this.runtime,
+      runtime,
       input.request
     );
+    await input.verifyContext?.();
     const firstProposal = input.schema.parse(firstGeneration.data);
     const firstIssues = findFactReferenceIssues(
       input.truth,
@@ -253,7 +260,8 @@ export class AiGenerationService {
       ...input.truth.sellingPoints
     ].map((fact) => ({ id: fact.id, statement: fact.statement }));
     const allowedFactIds = allowedFacts.map((fact) => fact.id);
-    const correctionGeneration = await generateStructuredJson(this.runtime, {
+    await input.verifyContext?.();
+    const correctionGeneration = await generateStructuredJson(runtime, {
       ...input.request,
       task:
         `Correct the previous ${input.stageLabel} JSON. Return the complete corrected output, not a patch.`,
@@ -279,6 +287,7 @@ export class AiGenerationService {
         uncertainClaimIds: input.truth.uncertainClaims.map((claim) => claim.id)
       }
     });
+    await input.verifyContext?.();
     const correctedProposal = input.schema.parse(correctionGeneration.data);
     const correctedIssues = findFactReferenceIssues(
       input.truth,
@@ -383,6 +392,7 @@ export class AiGenerationService {
     creativeContext?: CreativeProductionContext,
     directorVersion: 2 | 3 = 2
   ): Promise<CreativeBatch> {
+    referenceVideoProfile=referenceVideoProfile?structuredClone(referenceVideoProfile):referenceVideoProfile;
     const truth = productTruthSchema.parse(truthInput);
     const references = this.references ? await this.references.current(truth.projectId) : creativeContext?.references;
     assertReferenceBinding(referenceSetRef(references), references, truth);
@@ -482,6 +492,10 @@ export class AiGenerationService {
       await this.generateWithFactReferenceCorrection({
         request,
         schema: creativeProposalSchema,
+        referenceVideoProfile,
+        verifyContext:async()=>{
+          if(this.loadDouyinCreativeFeedback&&hashValue((await this.loadDouyinCreativeFeedback(truth.projectId)).map(item=>feedbackContextSchema.parse(item)))!==hashValue(douyinFeedback))throw new DomainValidationError("创意请求期间已采用反馈发生变化，停止返回候选，不自动重试");
+        },
         truth,
         stageLabel: "创意方案",
         factGroups: (value) =>
@@ -539,6 +553,7 @@ export class AiGenerationService {
     directorVersion?: 2 | 3;
     visualMedia?: StructuredAiRequest["media"];
   }): Promise<ScriptDraft> {
+    input={...input,referenceVideoProfile:input.referenceVideoProfile?structuredClone(input.referenceVideoProfile):input.referenceVideoProfile};
     const truth = productTruthSchema.parse(input.truth);
     const batch = creativeBatchSchema.parse(input.batch);
     assertReferenceVideoInputBinding(input.referenceVideoProfile,truth.projectId,[batch.referenceVideoProfileRef]);
@@ -660,6 +675,7 @@ export class AiGenerationService {
         ? await this.generateWithFactReferenceCorrection({
             request,
             schema: scriptV3ProposalSchema,
+            referenceVideoProfile:input.referenceVideoProfile,
             truth,
             stageLabel: "脚本 V3",
             factGroups: (value) =>
@@ -668,6 +684,7 @@ export class AiGenerationService {
         : await this.generateWithFactReferenceCorrection({
             request,
             schema: scriptProposalSchema,
+            referenceVideoProfile:input.referenceVideoProfile,
             truth,
             stageLabel: "脚本",
             factGroups: (value) =>
@@ -729,7 +746,7 @@ export class AiGenerationService {
       ...draft,
       contentHash: contentHash(draft)
     });
-    await this.usageCompliance.assertScript(truth, parsed);
+    await new UsageComplianceService(referenceVideoEvidenceRuntime(this.runtime,input.referenceVideoProfile,truth.projectId,this.verifyReferenceVideo)).assertScript(truth, parsed);
     return parsed;
   }
 }

@@ -50,23 +50,41 @@ export function startSmartGenerationWorker(service: SmartGenerationService, opti
 } = {}): () => void {
   const policy: SmartWorkerPolicy = options.policy ??
     (options.scope ? { mode: "SCOPED", scope: options.scope } : { mode: "ALL" });
+  if (policy.mode === "DISABLED") return () => {};
   let stopped = false, working = false;
+  let startupRecovered = false;
+  let afterId:string|undefined;
   const tick = async () => {
     if (stopped || working) return;
     working = true;
     try {
+      // Recovery and advancement share the same single-flight guard. Retry a
+      // failed startup on a later tick; never advance while it is unresolved.
+      if (policy.mode === "ALL" && !startupRecovered) {
+        await service.recoverAbandoned();
+        startupRecovered = true;
+      }
+      if (stopped) return;
+      if (policy.mode === "SCOPED") {
+        // A lease can become abandoned long after startup, too.
+        await service.recoverAbandonedScoped(policy.scope.projectId, policy.scope.runId);
+      }
+      if (stopped) return;
       // A scoped launch must not list, recover or mutate historical runs.
-      const originalRuns = policy.mode === "SCOPED"
-        ? [await service.get(policy.scope.projectId, policy.scope.runId)].filter(
+      const page = policy.mode === "SCOPED"
+        ? {runs:[await service.get(policy.scope.projectId, policy.scope.runId)].filter(
           (run): run is NonNullable<typeof run> => Boolean(run)
-        )
-        : await service.list();
-      for (const original of originalRuns) {
+        ),nextAfterId:undefined}
+        : service.listWorkerPage ? await service.listWorkerPage({afterId,mode:policy.mode,...(policy.mode==="MANAGED"?{legacyScope:policy.legacyScope}:{})}) : {runs:await service.list(),nextAfterId:undefined};
+      for (const original of page.runs) {
+        if (stopped) break;
         // Reading the task index never grants execution permission to old runs.
         if (!canWorkerAdvanceRun(policy, original.projectId, original.id, original.autoAdvanceGrant)) continue;
-        if (policy.mode === "MANAGED") {
-          // Only a specifically granted run's provably dead lease can be recovered.
-          await service.recoverAbandonedScoped(original.projectId, original.id);
+        if (policy.mode === "MANAGED" || policy.mode === "ALL") {
+          // Owners can die after startup. Recheck only a run this policy may
+          // advance; the service leaves every live or unknown OS owner intact.
+          try{await service.recoverAbandonedScoped(original.projectId, original.id);}
+          catch(error){options.onError?.(error);continue;}
         }
         if (stopped) break;
         let run = original;
@@ -78,21 +96,12 @@ export function startSmartGenerationWorker(service: SmartGenerationService, opti
           if (externalPoll) break;
         }
       }
+      if(!stopped)afterId=page.nextAfterId;
     } catch (error) { options.onError?.(error); }
     finally { working = false; }
   };
   const timer = setInterval(() => { void tick(); }, Math.max(1000, options.intervalMs ?? 5000));
   timer.unref();
-  if (policy.mode === "SCOPED") {
-    // At startup recover ONLY the exact scoped run.
-    void service.recoverAbandonedScoped(policy.scope.projectId, policy.scope.runId)
-      .then(tick)
-      .catch((error) => options.onError?.(error));
-  } else if (policy.mode === "MANAGED") {
-    // NO global lease recovery or historical Run advancement on startup.
-    void tick();
-  } else if (policy.mode === "ALL") {
-    void service.recoverAbandoned().then(tick).catch((error) => options.onError?.(error));
-  }
+  void tick();
   return () => { stopped = true; clearInterval(timer); };
 }

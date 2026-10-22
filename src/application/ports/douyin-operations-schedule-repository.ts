@@ -1,4 +1,5 @@
 import type { DouyinOperationsSchedule } from "../../domain/douyin-operations-schedule.js";
+import type { DouyinCollectionRun } from "../../domain/douyin-collection.js";
 
 export interface DouyinOperationsScheduleRepository {
   create(run: DouyinOperationsSchedule): Promise<DouyinOperationsSchedule>;
@@ -9,4 +10,8 @@ export interface DouyinOperationsScheduleRepository {
   save(run: DouyinOperationsSchedule, owner: string, until: string): Promise<DouyinOperationsSchedule>;
   pause(projectId: string, id: string, expectedRevision: number, now: string): Promise<DouyinOperationsSchedule | null>;
   release(projectId: string, id: string, owner: string): Promise<void>;
+  assertLease?(projectId:string,id:string,revision:number,owner:string,now:string):Promise<void>;
+  /** Atomically compare the original plan and every saved child; no partial unblocking. */
+  resume?(projectId:string,id:string,revision:number,inputHash:string,now:string,collections:readonly DouyinCollectionRun[]):Promise<DouyinOperationsSchedule|null>;
+  inspectLease?(projectId:string,id:string,now:string):Promise<{revision:number;state:"ACTIVE"|"EXPIRED"|"FREE";expiresAt?:string;checkedAt:string}|null>;
 }

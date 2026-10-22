@@ -107,6 +107,8 @@ export type ResearchBrief = {
 };
 
 export type ResearchBrowserState = {
+  /** Explicitly persisted reduced-work mode; never inferred from an old run. */
+  collectionOnly?: boolean;
   provider: string;
   resumeToken?: string;
   lastCheckedAt: string;

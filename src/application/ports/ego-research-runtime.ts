@@ -6,6 +6,8 @@ export type EgoResearchCapture={sourceUrl:string;finalUrl:string;title:string;te
 /** Browser execution only; ResearchService remains the sole business workflow. No login, click, input or publish API. */
 export interface EgoResearchRuntime{
   readonly identity:string;
+  /** Only an explicitly injected owned-page executor may expose this binding. */
+  readonly ownedSourceUrl?:string;
   open(spaceName:string):Promise<EgoResearchBinding>;
   read(binding:EgoResearchBinding,input:{url?:string;screenshotPath?:string}):Promise<EgoResearchCapture>;
 }

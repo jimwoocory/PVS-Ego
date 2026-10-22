@@ -11,9 +11,13 @@ import type {
 } from "../application/services/douyin-ops-dashboard-service.js";
 import { DouyinOpsRuntimeError } from "../application/ports/douyin-ops-runtime.js";
 import { DomainValidationError } from "../domain/validation.js";
+import type {EgoLiteDouyinReadPort} from "../application/ports/ego-lite-douyin-read.js";
+import type {ProductFlowService} from "../application/services/product-flow.js";
+import {renderEgoLiteDouyinPage} from "./ego-lite-douyin-ui.js";
 import {
   renderDouyinOpsGlobalPage,
-  renderDouyinOpsProjectPage
+  renderDouyinOpsProjectPage,
+  renderDouyinOpsBlockedPage
 } from "./douyin-ops-ui.js";
 
 function json(
@@ -71,6 +75,9 @@ function publicError(error: unknown): {
   code: string;
   message: string;
 } {
+  if(error&&typeof error==="object"&&"code" in error&&error.code==="ISOLATION_REAL_PORT_DISABLED")return {
+    status:503,code:"DOUYIN_OPS_EXECUTION_DISABLED",message:"当前隔离版本尚未启用抖音运营执行器。"
+  };
   if (error instanceof z.ZodError) {
     return {
       status: 400,
@@ -124,6 +131,8 @@ export async function handleDouyinOpsHttp(
   deps: {
     douyinOpsDashboard?: DouyinOpsDashboardService;
     douyinCollection?: DouyinCollectionService;
+    egoLiteDouyinRead?:EgoLiteDouyinReadPort;
+    productFlow?:ProductFlowService;
   }
 ): Promise<boolean> {
   const globalPage = url.pathname === "/douyin-ops";
@@ -209,8 +218,20 @@ export async function handleDouyinOpsHttp(
     return false;
   }
 
+  if(deps.egoLiteDouyinRead&&req.method!=="GET"){
+    json(res,403,{code:"EGO_DOUYIN_READ_ONLY",message:"当前 Ego Lite 运营仅支持原 Agent 逐项确认后的账号与本人作品读取；旧运营命令、发布和回复均未启用。"});return true;
+  }
+  if(deps.egoLiteDouyinRead&&(globalPage||globalApi||projectPage)){
+    if(req.method!=="GET"){json(res,405,{message:"只读页面不执行动作，请到原 Agent 工作台逐项确认"});return true;}
+    if(globalApi){json(res,200,deps.egoLiteDouyinRead.peek());return true;}
+    const projects=(await deps.productFlow?.listProjects()??[]).map(p=>({id:p.id,name:p.name}));
+    const selected=projectPage?decodeURIComponent(projectPage[1]!):undefined;
+    if(selected&&!projects.some(p=>p.id===selected)){json(res,404,{message:"项目不存在"});return true;}
+    html(res,200,renderEgoLiteDouyinPage(deps.egoLiteDouyinRead.peek(),projects,selected));return true;
+  }
   const service = deps.douyinOpsDashboard;
   if (!service) {
+    if((globalPage||projectPage)&&req.method==="GET"){html(res,503,renderDouyinOpsBlockedPage("抖音运营服务尚未配置。",true));return true;}
     json(res, 503, {
       code: "DOUYIN_OPS_UNAVAILABLE",
       message: "抖音运营服务尚未配置"
@@ -594,6 +615,9 @@ export async function handleDouyinOpsHttp(
     return true;
   } catch (error) {
     const mapped = publicError(error);
+    if((globalPage||projectPage)&&req.method==="GET"){
+      html(res,mapped.status,renderDouyinOpsBlockedPage(mapped.message,mapped.code==="DOUYIN_OPS_EXECUTION_DISABLED"));return true;
+    }
     json(res, mapped.status, {
       code: mapped.code,
       message: mapped.message

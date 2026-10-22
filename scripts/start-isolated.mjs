@@ -10,10 +10,17 @@ if (!process.argv.includes('--serve')) {
   console.log(JSON.stringify({status: 'ISOLATION_PREFLIGHT_ONLY', realExecution: 'DENIED', workers: 'DISABLED', port: Number(env.PORT), requiresExplicitServe: true}));
 } else {
   for (const dir of ['home', 'home/local', 'home/roaming', 'tmp', 'projects']) fs.mkdirSync(path.join(env.PVS_ISOLATION_SESSION, dir), {recursive: true});
+  if(fs.existsSync(path.join(root,'.runtime/ego-lite-installation.json'))){
+    const {startWorkbench}=await import('./ego-lite-supervisor.mjs');
+    const workbench=await startWorkbench({env});
+    console.log('PVS_EGO_LITE_LOCAL_READY '+env.PORT);
+    for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>void workbench.stop().then(()=>process.exit(0)).catch(()=>process.exit(1)));
+  } else {
   await import('./isolation-guard.mjs');
   const {createDefaultDependencies, createAppServer} = await import('../dist/src/web/server.js');
   const server = createAppServer(createDefaultDependencies());
   server.listen(Number(env.PORT), '127.0.0.1', () => console.log('PVS_ISOLATED_LOCAL_ONLY_READY ' + env.PORT));
   // Foreground only; no scheduler, recovery, helper, browser or service manager.
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => server.close(() => process.exit(0)));
+  }
 }

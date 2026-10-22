@@ -42,6 +42,7 @@ export interface ProductFlowRepository {
   getProject(projectId: string): Promise<Project | null>;
   nextVersion(projectId: string, entityType: VersionedEntityType, entityKey: string): Promise<number>;
   getVersion<T>(projectId: string, entityType: VersionedEntityType, id: string, version: number): Promise<T | null>;
+  getVerifiedVersion?<T>(projectId:string,entityType:VersionedEntityType,id:string,version:number):Promise<T|null>;
   commitVersion(input: CommitVersionInput): Promise<Project>;
   commitProjectUpdate(
     projectId: string,

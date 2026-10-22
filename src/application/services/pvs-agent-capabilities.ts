@@ -5,9 +5,11 @@ import { z } from "zod";
 import {canvasShortPreviewInput} from "../../domain/canvas-short-preview.js";
 import {CanvasShortDeliveryService} from "./canvas-short-delivery.js";
 import type { AgentCapability, AgentCapabilityCatalog, AgentCapabilityContext } from "../ports/agent-capability.js";
+import type {EgoLiteDouyinReadPort,EgoDouyinReadInput} from "../ports/ego-lite-douyin-read.js";
 import type { BusinessStage, CapabilityEffect, CapabilityResult, CycleEvidence } from "../../domain/agent-cycle.js";
 import { hashValue, sha256Bytes } from "../../domain/hashing.js";
 import { DomainValidationError } from "../../domain/validation.js";
+import {assertSavedMetricSnapshot} from "./douyin-read-evidence-audit.js";
 import { creativeBatchSchema, type CreativeBatch } from "../../domain/schemas.js";
 import { smartRunOptionsSchema, type SmartGenerationRun } from "../../domain/smart-generation.js";
 import { publishProviderTypeSchema } from "../../domain/publish.js";
@@ -44,6 +46,9 @@ import { assertCurrentQuote } from "./production-quote-service.js";
 export type PvsAgentCapabilityDependencies = {
   productFlow: ProductFlowService; productRepo: ProductFlowRepository; productInput: ProductInputStore;
   research: ResearchService; researchRepo: ResearchRepository; aiGeneration: AiGenerationService;
+  collectEgoLiteEvidence?: (context:AgentCapabilityContext,input:{goal:string;sourceUrls:Array<{url:string;sourceType:"USER_URL"}>})=>Promise<Awaited<ReturnType<ResearchService["startRun"]>>>;
+  ownedEgoLiteSourceUrl?: string;
+  egoLiteDouyinRead?:EgoLiteDouyinReadPort;
   smartGeneration: SmartGenerationService; referenceVideo: ReferenceVideoAnalysisService;
   finalOutput: FinalOutputRepository; finalAssembly: FinalAssemblyService; finalQc: FinalQcService; review: ReviewService;
   publishBridge: PublishBridgeService; publishRepo: PublishRepository;
@@ -64,6 +69,17 @@ const empty = z.object({}).strict();
 const runInput = z.object({ runId: id }).strict();
 const runStepInput = z.object({ runId: id, expectedRevision: z.number().int().positive() }).strict();
 const source = z.enum(["OFFICIAL", "USER_URL", "PUBLIC_PRODUCT", "COMPETITOR", "INDUSTRY", "TREND", "PLATFORM"]);
+function assertOwnedEgoLiteSources(baseUrl: string, sources: Array<{ url: string; sourceType: string }>, ownedUrl?: string) {
+  const base = new URL(baseUrl);
+  if (base.protocol !== "http:" || base.hostname !== "127.0.0.1" || !base.port) throw new DomainValidationError("Ego Lite 本机来源尚未配置");
+  for (const item of sources) {
+    const url = new URL(item.url);
+    if (item.sourceType !== "USER_URL" || url.origin !== base.origin || url.username || url.password || url.search || url.hash ||
+        !/^\/bridge-fixture\/[A-Za-z0-9-]{1,80}$/.test(url.pathname))
+      throw new DomainValidationError("当前仅允许明确绑定的本机合成来源");
+  }
+  if(ownedUrl && (sources.length!==1 || sources[0]!.url!==ownedUrl))throw new DomainValidationError("本机合成来源已经变化，请重新准备并确认当前动作");
+}
 const receiptSchema = z.object({
   projectId: id, cycleId: id, actionId: id, kind: z.string(), createdAt: z.string(), payload: z.record(z.string(), z.unknown())
 }).strict();
@@ -204,6 +220,17 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
     return binding;
   }
   private install() {
+    for(const operation of ["open","identity","works"] as const){
+      const label={open:"打开独立抖音登录会话",identity:"核验 Ego Lite 当前抖音账号",works:"读取已核验账号的本人作品指标"}[operation];
+      const schema=operation==="works"?z.object({epoch:z.string().min(1).max(120),expectedAccountUid:z.string().regex(/^[1-9]\d{0,39}$/),count:z.number().int().min(1).max(20),cursor:z.string().regex(/^(0|[1-9]\d{0,19})$/).default("0"),expectedPageToken:z.string().regex(/^[a-f0-9]{64}$/).optional()}).strict():z.object({epoch:z.string().min(1).max(120)}).strict();
+      this.add({id:"operations.ego-lite-"+operation,title:label,description:"具体确认后通过独立 Ego Lite 执行；只读本人账号/已确认单页作品，不发布、不回复、不调用模型。",stage:"OPERATIONS",effect:"HUMAN_DECISION",inputSchema:schema,
+        preview:async(projectId,input)=>{const port=this.d.egoLiteDouyinRead;if(!port||port.peek().epoch!==input.epoch)throw new DomainValidationError("当前 Ego Lite 运营会话已变化或未配置，请重新准备");return JSON.stringify({projectId,operation:label,source:port.peek().source,url:port.peek().source==="LIVE_DOUYIN"?"https://www.douyin.com/user/self":"本机合成夹具",...input,limits:"每页单独确认，绑定上页回执及游标；每页最多20条，每条链最多5页，不读取其他账号、不发布、不回复；登录与控制归还由用户手动完成"},null,2);},
+        run:async(context,input)=>{const port=this.d.egoLiteDouyinRead;if(!port)throw new DomainValidationError("Ego Lite 运营读取器尚未配置");
+          const value=await port.perform(context,{...input,operation} as EgoDouyinReadInput);
+          const artifact=await this.record(context,"EGO_LITE_DOUYIN_READ",value as unknown as Record<string,unknown>);
+          return answer(label+"："+value.status+"；"+value.message,value,[evidence("OPERATIONS","EGO_LITE_DOUYIN_READ",artifact.id)],"WAITING_USER");}
+      });
+    }
     this.add({ id: "project.inspect", title: "查看当前项目", description: "只读本地事实、任务、作品和已保存成果。", effect: "READ", inputSchema: empty,
       run: async c => answer("当前项目状态", await this.snapshot(c.projectId)) });
     this.add({ id: "project.confirm-truth", title: "确认产品事实", description: "核对具体产品事实、使用规则及产品主图后才能确认。", effect: "HUMAN_DECISION", inputSchema: z.object({ expectedHash: hash,
@@ -220,6 +247,15 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
         return answer("产品事实已确认", confirmed); } });
     this.add({ id: "research.inspect", title: "查看行业视频研究", description: "读取本项目已保存研究与候选视频，未实际搜索。", stage: "RESEARCH", effect: "READ", inputSchema: empty,
       run: async c => answer("已保存研究", await this.d.research.pageData(c.projectId)) });
+    this.add({ id: "research.collect-evidence", title: "只读采集本机合成来源", description: "经具体来源确认后仅保存本机合成页面证据；不搜索、不生成摘要、不调用模型。", stage: "RESEARCH", effect: "HUMAN_DECISION",
+      inputSchema: z.object({ goal: z.string().trim().min(3).max(3000), sourceUrls: z.array(z.object({ url: z.string().url(), sourceType: source }).strict()).min(1).max(6) }).strict(),
+      preview: async (_projectId, input) => { assertOwnedEgoLiteSources(this.d.publicBaseUrl, input.sourceUrls,this.d.ownedEgoLiteSourceUrl); return JSON.stringify({ goal: input.goal, sourceUrls: input.sourceUrls, operation: "仅采集来源证据，不运行搜索或模型" }, null, 2); },
+      run: async (context, input) => {
+        assertOwnedEgoLiteSources(this.d.publicBaseUrl, input.sourceUrls,this.d.ownedEgoLiteSourceUrl);
+        if(!this.d.collectEgoLiteEvidence)throw new DomainValidationError("Ego Lite 本机执行器尚未接入，未开始采集");
+        const result = await this.d.collectEgoLiteEvidence(context,{goal:input.goal,sourceUrls:input.sourceUrls.map(item=>({url:item.url,sourceType:"USER_URL"}))});
+        return answer("只读来源采集：" + result.run.status+(result.run.blockerMessage?"；"+result.run.blockerMessage:""), result, [evidence("RESEARCH", "RESEARCH_RUN", result.run.id)], result.run.status === "BLOCKED" ? "WAITING_USER" : result.run.status === "FAILED" ? "BLOCKED" : "COMPLETE");
+      } });
     this.add({ id: "research.start", title: "搜索行业与同类视频", description: "启动真实行业视频搜索与资料研究；遇登录或风控保留原任务。", stage: "RESEARCH", effect: "MODEL", inputSchema: z.object({
       goal: z.string().trim().min(3).max(3000), queries: z.array(z.string().trim().min(1).max(200)).max(12),
       sourceUrls: z.array(z.object({ url: z.string().url(), sourceType: source }).strict()).max(30).default([]),
@@ -494,6 +530,10 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
       run: async c => this.d.schedules ? answer("本项目运营观察计划", await this.d.schedules.list(c.projectId)) : answer("当前未配置运营计划服务", undefined, [], "BLOCKED") });
     this.add({ id: "operations.schedule-pause", title: "暂停原运营观察计划", description: "按原项目、计划和确切版本暂停后续观察，不删除已有数据。", stage: "OPERATIONS", effect: "LOCAL", inputSchema: z.object({ scheduleId: id, expectedRevision: z.number().int().positive() }).strict(),
       run: async (c, i) => this.d.schedules ? answer("运营观察计划已暂停", await this.d.schedules.pause(c.projectId, i.scheduleId, i.expectedRevision)) : answer("当前未配置运营计划服务", undefined, [], "BLOCKED") });
+    this.add({id:"operations.schedule-resume",title:"确认续接原运营观察计划",description:"核对当前版本、原范围哈希与实际账号后续接；不扩展次数、时间窗或解除未知读取结果。",stage:"OPERATIONS",effect:"HUMAN_DECISION",
+      inputSchema:z.object({scheduleId:id,expectedRevision:z.number().int().positive(),inputHash:hash,expectedAccountId:id}).strict(),
+      preview:async(p,i)=>{const run=await this.d.schedules?.get(p,i.scheduleId);if(!run||run.revision!==i.expectedRevision||run.inputHash!==i.inputHash||run.input.opsAccountUid!==i.expectedAccountId)throw new DomainValidationError("原计划版本或账号已变化");return `续接原计划 ${run.id}；账号 ${i.expectedAccountId}；作品 ${run.input.awemeId}；最多 ${run.input.maxCaptures} 次，已完成 ${run.completedCaptures} 次。保留原游标、时间窗和未知结果，不自动重读。`;},
+      run:async(c,i)=>this.d.schedules?answer("已保存原范围续接；不代表采集完成",await this.d.schedules.resume({projectId:c.projectId,id:i.scheduleId,expectedRevision:i.expectedRevision,inputHash:i.inputHash,expectedAccountId:i.expectedAccountId,confirmed:c.confirmed===true}),[],"PARTIAL"):answer("当前未配置运营计划服务",undefined,[],"BLOCKED")});
     this.add({ id: "operations.inspect", title: "查看已保存运营数据", description: "只读作品绑定、指标、评论和草稿，不访问平台。", stage: "OPERATIONS", effect: "READ", inputSchema: empty,
       run: async c => answer("本地运营数据", (await this.snapshot(c.projectId)).operations) });
     this.add({ id: "operations.metrics", title: "采集已绑定作品指标", description: "从实际平台读取当前指标并保存快照，不生成历史缺失指标。", stage: "OPERATIONS", effect: "READ", inputSchema: empty,
@@ -569,17 +609,23 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
 
   async snapshot(projectId: string): Promise<Record<string, unknown>> {
     const w = await this.workspace(projectId);
+    let feedbackReadError=false,insightReadError=false,scheduleReadError=false,artifactReadError=false,metricReadError=false;
     const [research, runs, final, preference, packages, receipts, binding, artifacts, feedback] = await Promise.all([
       this.d.research.pageData(projectId), this.d.smartGeneration.list(projectId), this.d.finalOutput.latestAssembly(projectId), this.d.publishRepo.getPreference(projectId),
       this.d.publishRepo.listPackages(projectId), this.d.publishRepo.listReceipts(projectId), this.d.opsRepo.latestWorkBinding(projectId, { preferBound: true }),
-      this.d.artifacts.listByProject(projectId), this.d.feedback.context(projectId)
+      this.d.artifacts.listByProject(projectId).catch(()=>{artifactReadError=true;return [];}), this.d.feedback.context(projectId).catch(()=>{feedbackReadError=true;return [];})
     ]);
     const [snapshots, comments, drafts, insight] = binding?.awemeId ? await Promise.all([
-      this.d.opsRepo.listMetricSnapshots({ projectId, awemeId: binding.awemeId, limit: 30 }), this.d.opsRepo.listComments({ projectId, awemeId: binding.awemeId, limit: 50, order: "desc" }),
-      this.d.opsRepo.listLatestReplyDrafts({ projectId, awemeId: binding.awemeId }), this.d.opsRepo.latestInsight(projectId, binding.awemeId)
+      (async()=>{try{
+        if(!binding.opsAccountUid)throw new DomainValidationError("原指标账号范围缺失");
+        const saved=await this.d.opsRepo.listMetricSnapshots({projectId,awemeId:binding.awemeId!,limit:30});
+        for(const item of saved)assertSavedMetricSnapshot(item,{projectId,bindingId:binding.id,awemeId:binding.awemeId!,opsAccountUid:binding.opsAccountUid});
+        return saved;
+      }catch{metricReadError=true;return [];}})(), this.d.opsRepo.listComments({ projectId, awemeId: binding.awemeId, limit: 50, order: "desc" }),
+      this.d.opsRepo.listLatestReplyDrafts({ projectId, awemeId: binding.awemeId }), this.d.opsRepo.latestInsight(projectId, binding.awemeId).catch(()=>{insightReadError=true;return null;})
     ]) : [[], [], [], null] as const;
     const collections = this.d.collections ? await this.d.collections.list(projectId) : [];
-    const schedules = this.d.schedules ? await this.d.schedules.list(projectId) : [];
+    const schedules = this.d.schedules ? await this.d.schedules.list(projectId).catch(()=>{scheduleReadError=true;return [];}) : [];
     // The short comment preview must not hide older parents with unread replies.
     const savedParents = binding?.awemeId ? await this.d.opsRepo.listComments({ projectId, awemeId: binding.awemeId,
       parentCid: null, limit: 1000, order: "desc" }) : [];
@@ -600,10 +646,11 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
         finalAssemblyId: p.finalAssemblyId, finalArtifactId: p.finalArtifactId, finalArtifactHash: p.finalArtifactHash })), receipts },
       operations: { binding, replyParents: savedParents.filter(c => (c.replyCount===undefined||c.replyCount > 0)).map(c => ({ cid: c.cid, replyCount: c.replyCount })),
         replyParentIndex: { savedTopLevelCount: savedParents.length, limit: 1000, truncated: savedParents.length === 1000 },
-        snapshots, collections, schedules, comments: comments.map(c => ({ id: c.id, cid: c.cid, parentCid: c.parentCid, text: c.text, replyCount: c.replyCount, category: c.category, contentHash: c.contentHash })), drafts, insight },
-      feedback, evidenceArtifacts: artifacts.filter(a => a.relativePath.startsWith("agent-evidence/")).map(a => ({ id: a.id, sha256: a.sha256, integrityStatus: a.integrityStatus })) };
+        snapshots, collections, schedules,scheduleReadError,insightReadError,metricReadError, comments: comments.map(c => ({ id: c.id, cid: c.cid, parentCid: c.parentCid, text: c.text, replyCount: c.replyCount, category: c.category, contentHash: c.contentHash })), drafts, insight },
+      feedback,feedbackReadError,artifactReadError, evidenceArtifacts: artifacts.filter(a => a.relativePath.startsWith("agent-evidence/")).map(a => ({ id: a.id, sha256: a.sha256, integrityStatus: a.integrityStatus })) };
   }
   async fingerprint(projectId: string, capabilityId?: string, input?: Record<string, unknown>) {
+    const egoDouyin=capabilityId?.startsWith("operations.ego-lite-")?this.d.egoLiteDouyinRead?.peek():undefined;
     // Authorization depends on business versions, not independent observations.
     // Never probe accounts/platforms, scan research progress or read collection,
     // metric and scheduling checkpoints when checking a user's authorization.
@@ -622,8 +669,8 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
       reply = { draft, parentComment: comment ? { id: comment.id, projectId: comment.projectId, awemeId: comment.awemeId,
         cid: comment.cid, parentCid: comment.parentCid, contentHash: comment.contentHash, text: comment.text } : null };
     }
-    return hashValue({ workspace, production: runs.map(run => ({ id: run.id, projectId: run.projectId, revision: run.revision })).sort((a, b) => a.id.localeCompare(b.id)), final,
-      publication: { preference, packages: packages.map(p => ({ id: p.id, status: p.status, providerType: p.providerType, title: p.titleDraft, description: p.descriptionDraft,
+    return hashValue({ workspace, ...(capabilityId==="research.collect-evidence"?{egoLiteSourceUrl:this.d.ownedEgoLiteSourceUrl}:{}), production: runs.map(run => ({ id: run.id, projectId: run.projectId, revision: run.revision })).sort((a, b) => a.id.localeCompare(b.id)), final,
+      ...(egoDouyin?{egoDouyin:{epoch:egoDouyin.epoch,uid:egoDouyin.identity?.uid,checkedAt:egoDouyin.checkedAt,pagination:egoDouyin.pagination}}:{}),publication: { preference, packages: packages.map(p => ({ id: p.id, status: p.status, providerType: p.providerType, title: p.titleDraft, description: p.descriptionDraft,
         finalAssemblyId: p.finalAssemblyId, finalArtifactId: p.finalArtifactId, finalArtifactHash: p.finalArtifactHash })), receipts }, binding, feedback, reply });
   }
   async validateCompletion(projectId: string, stages: BusinessStage[], supplied: CycleEvidence[]) {

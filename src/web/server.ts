@@ -1,6 +1,8 @@
 import "../isolation/require-isolation.js";
 import {deniedPort} from "../isolation/denied-port.js";
+import type {EgoLiteDouyinReadPort} from "../application/ports/ego-lite-douyin-read.js";
 import http from "node:http";
+import {AsyncLocalStorage} from "node:async_hooks";
 import { installChineseResponse, validationMessage } from "./chinese-response.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
@@ -54,6 +56,8 @@ import { HttpWebResearchProvider } from "../adapters/research/http-web-research-
 import { ExternalBrowserResearchProvider } from "../adapters/research/external-browser-research-provider.js";
 import { HybridBrowserResearchProvider } from "../adapters/research/public-search-research-provider.js";
 import {configuredResearchProviders} from "../adapters/research/configured-research-providers.js";
+import type {WebResearchDocument,WebResearchSource} from "../application/ports/research-provider.js";
+import type {AgentCapabilityContext} from "../application/ports/agent-capability.js";
 import { DefaultResearchMediaAnalyzer } from "../adapters/research/research-media-analyzer.js";
 import { YhtDouyinOpsMarketVideoMediaFetcher, YhtDouyinOpsMarketVideoSearchProvider } from "../adapters/research/yht-douyin-ops-market-video-provider.js";
 import {
@@ -113,6 +117,10 @@ import {
   referenceVideoBrowserPreviewRelativePath
 } from "../application/services/reference-video-analysis.js";
 import { ResearchService } from "../application/services/research-service.js";
+import { ResearchEvidenceReader } from "../application/services/research-evidence-reader.js";
+import { handleResearchEvidenceHttp } from "./research-evidence-http.js";
+import {OperationsEvidenceReader} from "../application/services/operations-evidence-reader.js";
+import {handleOperationsEvidenceHttp} from "./operations-evidence-http.js";
 import type { MarketVideoSearchProvider } from "../application/ports/market-video-provider.js";
 import { TaskCenterService } from "../application/services/task-center-service.js";
 import { SystemHealthService } from "../application/services/system-health-service.js";
@@ -199,6 +207,8 @@ import type {
 } from "../domain/schemas.js";
 
 export type WebDependencies = {
+  egoLite?: {sourceUrl:string};
+  egoLiteDouyinRead?:EgoLiteDouyinReadPort;
   agentCycles?: AgentCycleService;
   douyinCollection?: DouyinCollectionService;
   douyinSchedules?: DouyinOperationsScheduleService;
@@ -221,6 +231,8 @@ export type WebDependencies = {
   visualEditAssessment?: VisualEditAssessmentService;
   referenceVideo: ReferenceVideoAnalysisService;
   research: ResearchService;
+  researchEvidence?: ResearchEvidenceReader;
+  operationsEvidence?:OperationsEvidenceReader;
   douyinResearchAuth?: DouyinResearchAuthLauncher;
   douyinMarketVideoSearch?: MarketVideoSearchProvider;
   taskCenter: TaskCenterService;
@@ -247,7 +259,7 @@ export type WebDependencies = {
   provider: DomesticJimengCliProvider;
 };
 
-export function createDefaultDependencies(): WebDependencies {
+export function createDefaultDependencies(options: {egoLiteDouyinRead?:EgoLiteDouyinReadPort;egoLiteSourceUrl?:string;egoLiteReadSource?: (input:{source:WebResearchSource;projectId:string;runId:string;action:AgentCapabilityContext})=>Promise<WebResearchDocument>} = {}): WebDependencies {
   const artifacts = new PrismaArtifactRepository(prisma);
   const generation = new PrismaGenerationRepository(prisma);
   const workflow = new PrismaWorkflowRepository(prisma);
@@ -388,7 +400,12 @@ export function createDefaultDependencies(): WebDependencies {
         douyinBrowserResearchRuntime
       )
     );
-  const researchProviders={web:deniedPort<ReturnType<typeof configuredResearchProviders>["web"]>("WEB_RESEARCH"),browser:deniedPort<ReturnType<typeof configuredResearchProviders>["browser"]>("BROWSER_RESEARCH")};
+  const egoLiteAction=new AsyncLocalStorage<AgentCapabilityContext>();
+  const researchProviders={web:options.egoLiteReadSource?{fetchSource:async(source:WebResearchSource,context?:{projectId:string;runId:string})=>{
+    const action=egoLiteAction.getStore();
+    if(!action?.confirmed||!context||context.projectId!==action.projectId)throw new DomainValidationError("Ego Lite 采集缺少当前已确认动作范围");
+    return options.egoLiteReadSource!({source,projectId:context.projectId,runId:context.runId,action});
+  }}:deniedPort<ReturnType<typeof configuredResearchProviders>["web"]>("WEB_RESEARCH"),browser:deniedPort<ReturnType<typeof configuredResearchProviders>["browser"]>("BROWSER_RESEARCH")};
   const research = new ResearchService(
     researchRepo,
     researchProviders.web,
@@ -404,6 +421,7 @@ export function createDefaultDependencies(): WebDependencies {
       projectsRoot
     }
   );
+  const researchEvidence = new ResearchEvidenceReader(researchRepo,artifacts,projectsRoot);
   const douyinResearchAuth = deniedPort<WindowsDouyinResearchAuthLauncher>("BROWSER_AUTH");
   const generationConfig = loadGenerationConfig();
   const dreaminaCapability = new DreaminaAgentCapabilityService(provider);
@@ -489,10 +507,10 @@ export function createDefaultDependencies(): WebDependencies {
   const douyinProvider = deniedPort<OfficialDouyinOpenApiProvider>("OFFICIAL_PUBLISH");
   const douyinBrowserRuntime = deniedPort<SocialAutoUploadRuntime>("UPLOAD_PUBLISH");
   const douyinOpsRepo = new PrismaDouyinOpsRepository(prisma);
-  const douyinOpsRuntime = deniedPort<YhtDouyinOpsRuntime>("DOUYIN_OPS");
+  const douyinOpsRuntime = options.egoLiteDouyinRead??deniedPort<YhtDouyinOpsRuntime>("DOUYIN_OPS");
   const douyinAccountBinding = new DouyinAccountBindingService(
     douyinBrowserRuntime,
-    douyinOpsRuntime
+    douyinOpsRuntime,Boolean(options.egoLiteDouyinRead)
   );
   const douyinWorkBinding = new DouyinWorkBindingService();
   const douyinMetricService = new DouyinMetricService(
@@ -621,9 +639,11 @@ export function createDefaultDependencies(): WebDependencies {
     (projectId) =>
       douyinCreativeFeedbackService.context(
         projectId
-      )
+      ),
+    (profile,projectId)=>referenceVideo.assertCurrentEvidence(profile,projectId)
   );
-  const productDirector = new ProductDirectorService(new HermesProductDirectorGenerator(aiRuntime), aiRuntime,creativeReferences);
+  const verifyReferenceVideo=(profile:Parameters<ReferenceVideoAnalysisService["assertCurrentEvidence"]>[0],projectId:string)=>referenceVideo.assertCurrentEvidence(profile,projectId);
+  const productDirector = new ProductDirectorService(new HermesProductDirectorGenerator(aiRuntime,verifyReferenceVideo), aiRuntime,creativeReferences,verifyReferenceVideo);
   const scriptFeasibility = new ScriptFeasibilityService(aiRuntime);
   const v8Screenplay = new V8DetailedScreenplayService(aiRuntime);
   const directorV3Planner = new DirectorV3PlannerService();
@@ -668,7 +688,10 @@ export function createDefaultDependencies(): WebDependencies {
     publishBridge
   });
   const agentCapabilities = new PvsAgentCapabilities({
+    egoLiteDouyinRead:options.egoLiteDouyinRead,
+    ownedEgoLiteSourceUrl:options.egoLiteSourceUrl,
     productFlow,productRepo:productFlowRepo,productInput,research,researchRepo,aiGeneration,smartGeneration,referenceVideo,collections:douyinCollection,
+    ...(options.egoLiteReadSource?{collectEgoLiteEvidence:(context:AgentCapabilityContext,input:{goal:string;sourceUrls:Array<{url:string;sourceType:"USER_URL"}>})=>egoLiteAction.run(context,()=>research.startRun({projectId:context.projectId,mode:"BASIC",collectOnly:true,goal:input.goal,sourceUrls:input.sourceUrls,queries:[],marketVideo:{enabled:false}}))}:{}),
     schedules:douyinSchedules,readOpsAccount:()=>douyinOpsRuntime.identity(),
     finalOutput,finalAssembly,finalQc,review:reviewService,publishBridge,publishRepo,
     opsDashboard:douyinOpsDashboard,opsRepo:douyinOpsRepo,metrics:douyinMetricService,comments:douyinCommentService,
@@ -681,11 +704,14 @@ export function createDefaultDependencies(): WebDependencies {
       return {accountId:selected.platformUserId,displayName:selected.accountDisplayName??selected.platformUserId};
     }
   });
-  const agentCycles = new AgentCycleService(new PrismaAgentCycleRepository(prisma),agentCapabilities,aiRuntime);
+  const agentCycles = new AgentCycleService(new PrismaAgentCycleRepository(prisma),agentCapabilities,aiRuntime,undefined,new Set([...(options.egoLiteSourceUrl&&options.egoLiteReadSource?["research.collect-evidence"]:[]),...(options.egoLiteDouyinRead?["operations.ego-lite-open","operations.ego-lite-identity","operations.ego-lite-works"]:[])]));
   const dependencies: WebDependencies = {
+    ...(options.egoLiteDouyinRead?{egoLiteDouyinRead:options.egoLiteDouyinRead}:{}),
+    ...(options.egoLiteSourceUrl?{egoLite:{sourceUrl:options.egoLiteSourceUrl}}:{}),
     agentCycles,
     douyinCollection,
     douyinSchedules,
+    operationsEvidence:new OperationsEvidenceReader(new PrismaDouyinOperationsScheduleRepository(prisma),new PrismaDouyinCollectionRepository(prisma),douyinOpsRepo,productFlowRepo,artifacts,projectsRoot),
     creativeReferences,
     visualEditAssessment,
     collectCreativeReferences:(projectId)=>collectResearchReferences(projectId,research,productFlow,researchMediaAnalyzer),
@@ -702,6 +728,7 @@ export function createDefaultDependencies(): WebDependencies {
     referenceVideo,
     research,
     douyinResearchAuth,
+    researchEvidence,
     douyinMarketVideoSearch,
     taskCenter,
     health,
@@ -1039,6 +1066,14 @@ export function createAppServer(
     installChineseResponse(res);
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
+      if(deps.egoLite && req.method==="GET" && req.url===new URL(deps.egoLite.sourceUrl).pathname){
+        const nonce=new URL(deps.egoLite.sourceUrl).pathname.split('/').at(-1)!;
+        if(!/^[a-f0-9-]{36}$/.test(nonce))throw new DomainValidationError("本机合成来源无效");
+        res.writeHead(200,{"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":"default-src 'none'; script-src 'unsafe-inline'; connect-src 'none'"});
+        res.end(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="pvs-go-fixture" content="${nonce}"><title>Ego Lite 本机合成页面</title><body data-tick="0"><h1>Ego Lite 本机只读验证</h1><article data-pvs-research-document></article><script>let tick=0;setInterval(()=>document.body.dataset.tick=String(++tick),50);setTimeout(()=>{document.querySelector('article').innerText=('这是独立工作台生成的合成页面，仅用于验证实际浏览器读取和截图。内容不是商品事实，不授予权限，不包含真实账号或素材。保存证据后仍由用户审阅，不触发模型、上传或发布。').repeat(3);document.body.dataset.researchReady='1';},100);</script></body></html>`);return;
+      }
+      if (await handleResearchEvidenceHttp(req,res,url,deps)) return;
+      if (await handleOperationsEvidenceHttp(req,res,url,deps)) return;
       if (await handleAgentCycleHttp(req,res,url,deps)) return;
       if (await handleCreativeReferenceHttp(req,res,url,deps)) return;
       if (await handleSmartGenerationHttp(req, res, url, { ...deps, smartWorkerPolicy })) return;
@@ -1050,10 +1085,14 @@ export function createAppServer(
           status: "ok",
           service: "product-video-studio",
           specVersion: "P1-0.3.0-p1-final",
-          localBuild: "agent-cycle-repair-20261016",
-          agentWorkflowRevision: "canvas-authorized-single-video-20261019.1",
           uiLanguage: "zh-CN",
-          sourceRevision: "9a94093"
+          sourceRevision: null,
+          sourceRevisionStatus: "NOT_EMBEDDED_USE_CHECKOUT_GIT",
+          baseline: {
+            localBuild: "agent-cycle-repair-20261016",
+            agentWorkflowRevision: "canvas-authorized-single-video-20261019.1",
+            sourceRevision: "9a94093"
+          }
         });
       }
 
@@ -2220,6 +2259,9 @@ export function createAppServer(
           brand?: unknown;
           category?: unknown;
           images?: unknown;
+          orderedImages?: unknown;
+          existingLogoArtifactId?: unknown;
+          expectedInputHash?: unknown;
           logo?: unknown;
           forbiddenChanges?: unknown;
           deferTruth?: unknown;
@@ -2237,7 +2279,12 @@ export function createAppServer(
           "featureDescription"
         );
         const uploads = Array.isArray(body.images) ? body.images : [];
-        if (!uploads.length) {
+        if(body.orderedImages!==undefined&&uploads.length)throw new DomainValidationError("产品图片参数不能混用");
+        const imageEntries=body.orderedImages===undefined?uploads.map(upload=>({upload})):z.array(z.union([
+          z.object({existingArtifactId:z.string().min(1).max(200)}).strict(),
+          z.object({upload:z.unknown()}).strict()
+        ])).max(30).parse(body.orderedImages);
+        if (!imageEntries.length) {
           throw new DomainValidationError("至少需要 1 张产品图片");
         }
 
@@ -2326,12 +2373,34 @@ export function createAppServer(
           return asset;
         };
 
+        const existingIds=imageEntries.flatMap(item=>'existingArtifactId' in item?[item.existingArtifactId]:[]);
+        const existingLogoId=body.existingLogoArtifactId===undefined?undefined:requireString(body.existingLogoArtifactId,"existingLogoArtifactId");
+        if(existingLogoId&&body.logo)throw new DomainValidationError("品牌标志参数不能混用");
+        const allIds=[...existingIds,...(existingLogoId?[existingLogoId]:[])];
+        if(new Set(allIds).size!==allIds.length)throw new DomainValidationError("产品素材不能重复");
+        const prior=(allIds.length||body.expectedInputHash!==undefined)?await deps.productInput.latest(projectId):null;
+        if((prior||allIds.length||body.expectedInputHash!==undefined)&&(!prior||body.expectedInputHash!==prior.contentHash))throw new DomainValidationError("资料版本已变化，请刷新后重新保存");
+        const reused=new Map<string,AssetRef>();
+        for(const artifactId of allIds){
+          const type=artifactId===existingLogoId?'logo':'image';
+          const asset=prior!.assets.find(a=>a.artifactId===artifactId&&a.type===type&&a.source==='user_upload');
+          const record=await deps.artifacts.findById(artifactId);
+          if(!asset||!record||record.projectId!==projectId||record.kind!=='USER_INPUT'||record.integrityStatus!=='READY'||!record.immutable||!record.sha256||record.sha256!==asset.sha256||record.sizeBytes!==asset.sizeBytes||record.mimeType!==asset.mimeType||!record.mimeType?.startsWith('image/'))throw new DomainValidationError("已保存素材不可核验，请重新选择图片");
+          try{
+            const file=artifactStore.resolveArtifactPath(record.relativePath),before=await fs.lstat(file);
+            if(!before.isFile()||before.nlink!==1||before.size>10*1024*1024||await fs.realpath(file)!==file)throw Error('MATERIAL_PATH_CHANGED');
+            const bytes=await fs.readFile(file),after=await fs.lstat(file);
+            if(bytes.length!==record.sizeBytes||sha256Bytes(bytes)!==record.sha256||before.ino!==after.ino||before.size!==after.size||before.mtimeMs!==after.mtimeMs||!after.isFile()||after.nlink!==1||await fs.realpath(file)!==file)throw Error('MATERIAL_CHANGED');
+          }catch{throw new DomainValidationError("已保存素材不可核验，请重新选择图片");}
+          reused.set(artifactId,asset);
+          storedDetails.push({asset,artifactId,relativePath:record.relativePath,sha256:record.sha256,mimeType:record.mimeType});
+        }
         const imageAssets: AssetRef[] = [];
-        for (const upload of uploads) {
-          imageAssets.push(await storeUpload(upload, "image"));
+        for (const item of imageEntries) {
+          imageAssets.push('existingArtifactId' in item?reused.get(item.existingArtifactId)!:await storeUpload(item.upload, "image"));
         }
         const logoAsset =
-          body.logo && typeof body.logo === "object"
+          existingLogoId?reused.get(existingLogoId):body.logo && typeof body.logo === "object"
             ? await storeUpload(body.logo, "logo")
             : undefined;
 
@@ -3757,14 +3826,20 @@ export function createAppServer(
 
       const browserPreparationMatch=url.pathname.match(/^\/api\/projects\/([^/]+)\/publish\/packages\/([^/]+)\/browser-preflight(?:\/(prepare|handoff|resume))?$/);
       if(browserPreparationMatch&&(req.method==="GET"||req.method==="POST")){
+       try{
         const projectId=browserPreparationMatch[1]!,packageId=browserPreparationMatch[2]!,action=browserPreparationMatch[3];
         const service=deps.publishBridge.browserPreparation;
         if(!service)throw new DomainValidationError("分阶段浏览器发布未配置，停止，不自动使用组合发布");
         if(req.method==="GET"&&!action)return json(res,200,{checkpoint:await service.status(projectId,packageId),supported:deps.publishBridge.browserPreparationSupported});
-        const body=await readJson(req) as {confirmedPreparation?:unknown;expectedAccountId?:unknown;confirmed?:unknown;confirmedReturnControl?:unknown};
-        const checkpoint=action==="prepare"?await service.prepare({projectId,packageId,expectedAccountId:requireString(body.expectedAccountId,"expectedAccountId"),confirmedPreparation:body.confirmedPreparation===true}):action==="handoff"?await service.handoff({projectId,packageId,confirmed:body.confirmed===true}):action==="resume"?await service.resume({projectId,packageId,confirmedReturnControl:body.confirmedReturnControl===true}):null;
+        const body=await readJson(req) as {confirmedPreparation?:unknown;expectedAccountId?:unknown;confirmed?:unknown;confirmedReturnControl?:unknown;scopeHash?:unknown;revision?:unknown};
+        const consent={expectedAccountId:typeof body.expectedAccountId==='string'?body.expectedAccountId:undefined,scopeHash:typeof body.scopeHash==='string'?body.scopeHash:undefined,revision:typeof body.revision==='number'?body.revision:undefined};
+        const checkpoint=action==="prepare"?await service.prepare({projectId,packageId,expectedAccountId:requireString(body.expectedAccountId,"expectedAccountId"),confirmedPreparation:body.confirmedPreparation===true}):action==="handoff"?await service.handoff({projectId,packageId,confirmed:body.confirmed===true,...consent}):action==="resume"?await service.resume({projectId,packageId,confirmedReturnControl:body.confirmedReturnControl===true,...consent}):null;
         if(!checkpoint)throw new DomainValidationError("未知发布预检操作");
         return json(res,200,{checkpoint});
+       }catch(error){
+        if(error instanceof Error&&error.message==='BROWSER_CHECKPOINT_INTEGRITY_FAILED')throw new DomainValidationError('原发布检查点完整性无法核验，已停止。请检查原记录，不重新上传或提交。');
+        throw error;
+       }
       }
 
       const publishPackageDirectMatch = url.pathname.match(

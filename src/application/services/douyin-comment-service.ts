@@ -178,6 +178,7 @@ export class DouyinCommentService {
     parentCid?: string;
     cursor?: string;
     beforePersist?:()=>Promise<void>;
+    writeFence?:import("../ports/operations-write-fence.js").OperationsWriteFence;
   }): Promise<DouyinCommentSyncResult> {
     if (!input.binding.awemeId) {
       throw new DomainValidationError(
@@ -197,6 +198,7 @@ export class DouyinCommentService {
     while (pages < input.maxPages && hasMore) {
       const previousCursor = cursor;
       await this.verifyBinding(input.binding);
+      await input.beforePersist?.(); // Fence the read after asynchronous account checks too.
       const page = input.parentCid
         ? await this.runtime.getReplies({
             awemeId: input.binding.awemeId,
@@ -242,7 +244,7 @@ export class DouyinCommentService {
           synced.add(record.cid);
         }
       }
-      if(records.length||pageEvidence){await input.beforePersist?.();await this.repo.upsertComments(records,pageEvidence);}
+      if(records.length||pageEvidence){await input.beforePersist?.();await this.repo.upsertComments(records,pageEvidence,input.writeFence);}
 
       pages += 1;
       cursor = page.cursor || previousCursor;
@@ -278,6 +280,7 @@ export class DouyinCommentService {
     awemeId?: string;
     cursor?: string;
     beforePersist?:()=>Promise<void>;
+    writeFence?:import("../ports/operations-write-fence.js").OperationsWriteFence;
   }): Promise<DouyinCommentSyncResult> {
     const binding = await this.resolveBinding(input);
     return this.syncPages({
@@ -286,6 +289,7 @@ export class DouyinCommentService {
       pageSize: boundedInt(input.pageSize, 20, 1, 20),
       cursor: input.cursor,
       beforePersist:input.beforePersist,
+      writeFence:input.writeFence,
       syncedAt: input.syncedAt ?? new Date().toISOString()
     });
   }
@@ -301,6 +305,7 @@ export class DouyinCommentService {
     awemeId?: string;
     cursor?: string;
     beforePersist?:()=>Promise<void>;
+    writeFence?:import("../ports/operations-write-fence.js").OperationsWriteFence;
   }): Promise<DouyinCommentSyncResult> {
     const binding = await this.resolveBinding(input);
     if (!binding.awemeId) {
@@ -326,6 +331,7 @@ export class DouyinCommentService {
       pageSize: boundedInt(input.pageSize, 20, 1, 20),
       cursor: input.cursor,
       beforePersist:input.beforePersist,
+      writeFence:input.writeFence,
       syncedAt: input.syncedAt ?? new Date().toISOString()
     });
   }

@@ -639,10 +639,10 @@ export function renderResearchPage(input: {
   const blockerHtml =
     latestRun?.status === "BLOCKED"
       ? `<section class="blocker">
-          <h3>深度研究需要你处理</h3>
+          <h3>${latestRun.blockerCode==="BRIEF_GENERATION_NOT_AUTHORIZED"?"来源证据已保存，摘要尚未生成":latestRun.mode==="DEEP"?"深度研究需要你处理":"研究任务已暂停"}</h3>
           <p>${esc(latestRun.blockerMessage ?? "浏览器研究暂时阻塞。")}</p>
           <p><b>下一步：</b>${esc(latestRun.requiredUserAction ?? "完成浏览器接管后继续。")}</p>
-          <p><button class="primary" id="research-resume" data-run="${esc(latestRun.id)}">继续深度研究</button></p>
+          ${latestRun.mode==="DEEP"&&latestRun.blockerCode!=="BRIEF_GENERATION_NOT_AUTHORIZED"?`<p><button class="primary" id="research-resume" data-run="${esc(latestRun.id)}">继续深度研究</button></p>`:""}
           <div id="research-resume-error" class="danger"></div>
           <p class="technical">code=${esc(latestRun.blockerCode ?? "UNKNOWN")}${latestRun.browserState ? " · provider="+esc(latestRun.browserState.provider) : ""}</p>
         </section>`
@@ -808,6 +808,7 @@ export function renderResearchPage(input: {
               <span class="status">研究证据</span>
             </div>
             <p>${esc(item.summary)}</p>
+            ${item.sourceCapture&&["go-local-owned-fixture","ego-browser-research"].includes(item.sourceCapture.provider)?`<p><a class="secondary" href="/projects/${encodeURIComponent(workspace.project.id)}/research/runs/${encodeURIComponent(item.runId)}/evidence/${encodeURIComponent(item.id)}">查看已保存正文</a></p><p class="muted">打开时核验文件与正文哈希；查看不会重新采集或生成摘要。</p>`:""}
             ${item.mediaContext ? `<p class="muted"><b>${item.mediaContext.type === "IMAGE" ? "图片视觉证据" : item.mediaContext.type === "AUDIO" ? "视频音频证据" : "视频采样帧证据"}</b> · 分析方式：${item.mediaContext.analysisMethod === "VISION" ? "多模态视觉分析" : item.mediaContext.analysisMethod === "AUDIO_MULTIMODAL" ? "音频多模态分析" : "视频抽帧 + 多模态分析"}${item.mediaContext.timestampsMs?.length ? ` · 时间点：${item.mediaContext.timestampsMs.map((ms)=>`${(ms/1000).toFixed(1)}s`).join(" / ")}` : ""}${item.mediaContext.productIdentityMatch ? `<br>产品身份：${item.mediaContext.productIdentityMatch === "CONFIRMED" ? "已确认" : item.mediaContext.productIdentityMatch === "NOT_PRODUCT" ? "非当前产品" : "未确认"}${item.mediaContext.identityReason ? " · "+esc(item.mediaContext.identityReason) : ""}` : ""}<br>来源页面：${esc(item.mediaContext.parentSourceUrl)}</p>` : ""}
             <p><a class="secondary" href="${esc(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">打开来源</a></p>
             <p class="technical hash">evidence=${esc(item.id)}<br>contentHash=${esc(item.contentHash)}<br>relatedClaims=${esc(item.relatedClaims.join(","))}</p>
@@ -2164,6 +2165,8 @@ async function pvsFilePayload(file){
   });
 }
 const productMaterialManager=pvsCreateMaterialManager({
+  initialItems:${jsonForScript(productInput?.assets.filter(asset=>asset.type==='image').map(asset=>({...asset,name:asset.originalFilename,previewUrl:'/api/artifacts/'+encodeURIComponent(asset.artifactId)+'/content'}))??[])},
+  initialLogo:${jsonForScript(productInput?.assets.find(asset=>asset.type==='logo')?((asset)=>({...asset,name:asset.originalFilename,previewUrl:'/api/artifacts/'+encodeURIComponent(asset.artifactId)+'/content'}))(productInput.assets.find(asset=>asset.type==='logo')!):null)},
   input:document.querySelector('#product-image-input'),
   replaceInput:document.querySelector('#product-image-replace-input'),
   list:document.querySelector('#product-image-list'),
@@ -2181,6 +2184,12 @@ const productMaterialManager=pvsCreateMaterialManager({
 document.querySelector('#product-image-pick')?.addEventListener('click',()=>productMaterialManager.pickFiles());
 document.querySelector('#product-logo-pick')?.addEventListener('click',()=>productMaterialManager.pickLogo());
 
+const savedProductInputHash=${jsonForScript(productInput?.contentHash??null)};
+const savedForbiddenChanges=${jsonForScript(productInput?.forbiddenChanges??[])};
+if(savedForbiddenChanges.length){
+  const form=document.querySelector('#product-form'),rule=savedForbiddenChanges[0];
+  form.elements.forbiddenField.value=rule.field;form.elements.forbiddenSeverity.value=rule.severity;form.elements.forbiddenDescription.value=rule.description;
+}
 
 document.querySelector('#product-form').addEventListener('submit',async(e)=>{
   e.preventDefault();
@@ -2195,10 +2204,12 @@ document.querySelector('#product-form').addEventListener('submit',async(e)=>{
     if(!productMaterialManager.getItems().length)throw new Error('请至少选择 1 张产品图片');
     const invalid=productMaterialManager.validate();
     if(invalid.length)throw new Error('请先删除或替换不可用产品图片：'+invalid.join('、'));
-    const images=[];
+    const orderedImages=[];
     const readErrors=[];
-    for(const file of productMaterialManager.getNewFiles()){
-      try{images.push(await pvsFilePayload(file));}
+    for(const item of productMaterialManager.getItems()){
+      if(item.source==='existing'){orderedImages.push({existingArtifactId:item.artifactId});continue;}
+      const file=item.file;
+      try{orderedImages.push({upload:await pvsFilePayload(file)});}
       catch(readError){readErrors.push('文件“'+file.name+'”：'+(readError.message||String(readError)));}
     }
     const logoFile=productMaterialManager.getNewLogoFile();
@@ -2209,14 +2220,16 @@ document.querySelector('#product-form').addEventListener('submit',async(e)=>{
     }
     if(readErrors.length)throw new Error(readErrors.join('；'));
     const description=String(f.get('forbiddenDescription')||'').trim();
-    const forbiddenChanges=description?[{field:f.get('forbiddenField'),severity:f.get('forbiddenSeverity'),description}]:[];
+    const forbiddenChanges=[...(description?[{field:f.get('forbiddenField'),severity:f.get('forbiddenSeverity'),description}]:[]),...savedForbiddenChanges.slice(1)];
     const payload={
       productName:f.get('productName'),
       featureDescription:f.get('featureDescription'),
       brand:f.get('brand'),
       category:f.get('category'),
-      images,
+      orderedImages,
       logo,
+      existingLogoArtifactId:productMaterialManager.getLogo()?.source==='existing'?productMaterialManager.getLogo().artifactId:undefined,
+      expectedInputHash:savedProductInputHash??undefined,
       forbiddenChanges,
       deferTruth
     };

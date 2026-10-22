@@ -29,7 +29,8 @@ export interface DouyinOpsRepository {
   ): Promise<DouyinWorkBinding | null>;
 
   createMetricSnapshot(
-    input: DouyinMetricSnapshot
+    input: DouyinMetricSnapshot,
+    fence?:import("./operations-write-fence.js").OperationsWriteFence
   ): Promise<DouyinMetricSnapshot>;
 
   findMetricSnapshotByCaptureKey(
@@ -45,7 +46,8 @@ export interface DouyinOpsRepository {
 
   upsertComments(
     input: DouyinComment[],
-    pageEvidence?:import("../../domain/douyin-comment-observation.js").CommentPageEvidence
+    pageEvidence?:import("../../domain/douyin-comment-observation.js").CommentPageEvidence,
+    fence?:import("./operations-write-fence.js").OperationsWriteFence
   ): Promise<DouyinComment[]>;
   findCommentPageEvidence?(projectId:string,id:string):Promise<import("../../domain/douyin-comment-observation.js").CommentPageEvidence|null>;
 

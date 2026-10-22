@@ -15,6 +15,8 @@ export type WebResearchSource = {
 };
 
 export type ResearchSourceCapture = {provider:string; documentArtifactId:string; screenshotArtifactId?:string;
+  /** Frozen complete-file digests; absent legacy values never authorize cached execution. */
+  documentSha256?:string;screenshotSha256?:string;
   sourceUrl:string; finalUrl:string; fetchedAt:string; contentHash:string; truncated:boolean};
 
 export type WebResearchMedia = {

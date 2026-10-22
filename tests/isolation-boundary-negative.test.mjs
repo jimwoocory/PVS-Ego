@@ -81,7 +81,7 @@ test('isolated boundary: fail closed before production paths, transports, tasks 
   });
   await t.test('fresh relocated code and physical dependencies initialize without source checkout or old local state',async()=>{
     const relocated=path.join(root,'.runtime','relocated PVS 独立 '+randomUUID());fs.mkdirSync(relocated);
-    for(const name of ['node_modules','scripts','prisma','dist','config','skills','browser-extension']){
+    for(const name of ['node_modules','scripts','prisma','dist','config','skills','browser-extension','execution','src','tests']){
       fs.cpSync(path.join(root,name),path.join(relocated,name),{recursive:true,filter:p=>!p.endsWith('.db')});
     }
     fs.copyFileSync(path.join(root,'package.json'),path.join(relocated,'package.json'));
@@ -90,6 +90,30 @@ test('isolated boundary: fail closed before production paths, transports, tasks 
     const marker=JSON.parse(fs.readFileSync(path.join(relocated,'.pvs-isolation.json'),'utf8'));
     assert.equal(marker.root,relocated);assert.ok(marker.defaultSession.startsWith(relocated+path.sep));
     assert.notEqual(fs.statSync(path.join(root,'node_modules/.prisma/client/index.js')).ino,fs.statSync(path.join(relocated,'node_modules/.prisma/client/index.js')).ino);
+    // Bootstrap only: a nonexistent explicit compiler prevents any Go/Ego suite or host from starting.
+    assert.equal(fs.existsSync(path.join(relocated,'.runtime/go-bridge-location.json')),false);
+    const missingGo=path.join(relocated,'missing-local-go.exe');
+    for(const [runner,pointer] of [
+      ['run-go-bridge-isolated.mjs','go-bridge-latest-attempt.json'],
+      ['run-go-research-isolated.mjs','go-research-active.json'],
+      ['run-go-u1-session.mjs','go-u1-session-active.json']
+    ]){
+      const failed=spawnSync(process.execPath,[path.join(relocated,'scripts',runner),'--go',missingGo,'--ego-root',relocated],{cwd:relocated,env:base,encoding:'utf8',windowsHide:true,timeout:10000});
+      assert.equal(failed.status,1,failed.stderr+failed.stdout);
+      const attempt=JSON.parse(fs.readFileSync(path.join(relocated,'.runtime',pointer),'utf8'));
+      assert.ok(attempt.session.startsWith(path.join(relocated,'.runtime')+path.sep));
+      assert.equal(fs.realpathSync(attempt.session),attempt.session);
+      assert.equal(fs.statSync(path.join(attempt.session,'go-cache')).isDirectory(),true);
+      const failure=JSON.parse(fs.readFileSync(path.join(attempt.session,'evidence/attempt-failed.json'),'utf8'));
+      assert.equal(failure.code,'ENOENT');assert.ok(failure.reason.includes(missingGo),failure.reason);
+      if(runner==='run-go-bridge-isolated.mjs'){
+        const manifest=JSON.parse(fs.readFileSync(path.join(attempt.session,'evidence/source-manifest.json'),'utf8'));
+        assert.equal(Object.keys(failure.sourceHashes).length,14);assert.deepEqual(failure.sourceHashes,manifest.sourceHashes);
+        const guardSource=fs.readFileSync(path.join(relocated,'execution/go-ego-bridge/lifetime_windows.go'));
+        assert.equal(failure.sourceHashes['execution/go-ego-bridge/lifetime_windows.go'],createHash('sha256').update(guardSource).digest('hex'));
+      }
+      assert.equal(fs.existsSync(path.join(attempt.session,'evidence/final-acceptance.json')),false);
+    }
     const reserve=net.createServer();await new Promise(resolve=>reserve.listen(0,'127.0.0.1',resolve));const port=reserve.address().port;await new Promise(resolve=>reserve.close(resolve));
     const envFile=path.join(relocated,'.env');fs.writeFileSync(envFile,fs.readFileSync(envFile,'utf8').replace(/^PORT=\d+$/m,'PORT='+port));
     const inherited={...base,DATABASE_URL:'file:'+path.resolve(root,'../__pvs_forbidden_production__/dev.db').replaceAll('\\','/'),PVS_CANVAS_RUNTIME_CONFIG:'inert-sentinel'};

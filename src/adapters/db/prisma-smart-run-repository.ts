@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
-import type { SmartRunRepository } from "../../application/ports/smart-run-repository.js";
-import { closedSmartStatuses, smartRunSchema, type SmartGenerationRun, type SmartRunStatus } from "../../domain/smart-generation.js";
+import type { SmartRunRepository, SmartWorkerPageQuery } from "../../application/ports/smart-run-repository.js";
+import { closedSmartStatuses, runnableSmartStatuses, smartRunSchema, type SmartGenerationRun, type SmartRunStatus } from "../../domain/smart-generation.js";
 import { hashValue } from "../../domain/hashing.js";
 import { DomainValidationError } from "../../domain/validation.js";
 
@@ -27,6 +27,20 @@ export class PrismaSmartRunRepository implements SmartRunRepository {
     if (statuses) where.push(Prisma.sql`"status" IN (${Prisma.join(statuses)})`);
     const rows = await this.db.$queryRaw<DataRow[]>(Prisma.sql`SELECT "dataJson" FROM "SmartGenerationRunRecord" WHERE ${Prisma.join(where, " AND ")} ORDER BY "createdAt" DESC LIMIT 200`);
     return rows.map(decode);
+  }
+
+  /** Worker index: eligibility precedes the bound; stable keyset rotation avoids starvation. */
+  async listWorkerPage(query:SmartWorkerPageQuery){
+    // A process may die after saving a human-wait status but before releasing
+    // its lease. Keep that recovery candidate without advancing the human gate.
+    const where=[Prisma.sql`("status" IN (${Prisma.join(runnableSmartStatuses)}) OR "leaseOwner" IS NOT NULL)`];
+    if(query.afterId)where.push(Prisma.sql`"id">${query.afterId}`);
+    if(query.mode==="MANAGED"){
+      const granted=Prisma.sql`(json_extract("dataJson",'$.autoAdvanceGrant.projectId')="projectId" AND json_extract("dataJson",'$.autoAdvanceGrant.runId')="id")`;
+      where.push(query.legacyScope?Prisma.sql`(${granted} OR ("projectId"=${query.legacyScope.projectId} AND "id"=${query.legacyScope.runId}))`:granted);
+    }
+    const rows=await this.db.$queryRaw<Array<DataRow&{id:string}>>(Prisma.sql`SELECT "id","dataJson" FROM "SmartGenerationRunRecord" WHERE ${Prisma.join(where," AND ")} ORDER BY "id" ASC LIMIT 30`);
+    return {runs:rows.map(decode),...(rows.length===30?{nextAfterId:rows.at(-1)!.id}:{})};
   }
 
   async create(raw: SmartGenerationRun): Promise<SmartGenerationRun> {

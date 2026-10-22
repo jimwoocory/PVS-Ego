@@ -74,6 +74,9 @@ export class DouyinMetricService {
     capturedAt?: string;
     bindingId?:string;
     awemeId?:string;
+    beforeRead?:()=>Promise<void>;
+    beforePersist?:()=>Promise<void>;
+    writeFence?:import("../ports/operations-write-fence.js").OperationsWriteFence;
   }): Promise<DouyinMetricSnapshot> {
     const binding = input.bindingId?await this.repo.findWorkBindingById(input.bindingId):input.packageId
       ? await this.repo.findWorkBindingByPackage(input.packageId)
@@ -96,6 +99,7 @@ export class DouyinMetricService {
       if(prior){if(prior.bindingId!==binding.id||prior.awemeId!==binding.awemeId)throw new DomainValidationError("原指标采集标识属于不同绑定");return prior;}
     }
 
+    await input.beforeRead?.();
     const work = await this.runtime.getWork(binding.awemeId);
     await assertOperationsReadAccount(this.runtime,binding);
     const currentBinding=await this.repo.findWorkBindingById(binding.id);
@@ -149,7 +153,8 @@ export class DouyinMetricService {
       createdAt: now
     });
 
-    return this.repo.createMetricSnapshot(snapshot);
+    await input.beforePersist?.();
+    return this.repo.createMetricSnapshot(snapshot,input.writeFence);
   }
 
   async history(input: {

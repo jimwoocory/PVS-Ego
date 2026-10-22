@@ -1,10 +1,11 @@
 import {assertEvidenceScope} from "../../domain/douyin-feedback-validation.js";
 import {commentObservationSchema,legacyCommentObservation,commentPageEvidenceSchema,type CommentPageEvidence} from "../../domain/douyin-comment-observation.js";
-import {auditDouyinReadPage,observationsForDouyinPage} from "../../application/services/douyin-read-evidence-audit.js";
+import {auditDouyinReadPage,observationsForDouyinPage,assertSavedMetricSnapshot} from "../../application/services/douyin-read-evidence-audit.js";
 import type {DouyinOpsCommentPage} from "../../application/ports/douyin-ops-runtime.js";
 import {randomUUID} from "node:crypto";
 import {observationEvidenceSchema} from "../../domain/douyin-feedback-evidence.js";
 import type { PrismaClient } from "@prisma/client";
+import {assertOperationsWriteFence} from "./operations-write-fence.js";
 import { DomainValidationError } from "../../domain/validation.js";
 import {hashValue,sha256Text} from "../../domain/hashing.js";
 import {metricKeys,type MetricAvailability} from "../../domain/douyin-observation.js";
@@ -248,7 +249,7 @@ function snapshotToDomain(
   try{reported=JSON.parse(row.rawJson).metricAvailability??{};}catch{/* Preserve legacy raw bytes; missing provenance remains unverified. */}
   const metricAvailability:MetricAvailability={},metrics:Partial<Record<typeof metricKeys[number],number>>={};
   for(const key of metricKeys){const value=row[key]??undefined,state=reported[key]??(value===undefined?"NOT_PROVIDED":value===0?"LEGACY_UNVERIFIED":"OBSERVED");metricAvailability[key]=state;if(state==="OBSERVED"&&value!==undefined)metrics[key]=value;}
-  return douyinMetricSnapshotSchema.parse({
+  const value = douyinMetricSnapshotSchema.parse({
     id: row.id,
     projectId: row.projectId,
     bindingId: row.bindingId,
@@ -263,6 +264,16 @@ function snapshotToDomain(
     contentHash: row.contentHash,
     createdAt: row.createdAt.toISOString()
   });
+  assertSavedMetricSnapshot(value,{projectId:row.projectId,bindingId:row.bindingId,awemeId:row.awemeId});
+  return value;
+}
+
+/** All partial reads must honor the original version row, including list reads. */
+function partialSnapshotToDomain(row:{id:string;projectId:string;entityType:string;entityKey:string;version:number;status:string;contentHash:string;dataJson:string}):DouyinMetricSnapshot{
+  const value=douyinMetricSnapshotSchema.parse(JSON.parse(row.dataJson));
+  if(row.entityType!=="DouyinMetricPartialSnapshot"||row.version!==1||row.status!=="PARTIAL"||value.id!==row.id||value.projectId!==row.projectId||value.captureKey!==row.entityKey||value.contentHash!==row.contentHash)throw new DomainValidationError("部分指标观察记录与原版本行不一致，停止复用");
+  assertSavedMetricSnapshot(value,{projectId:row.projectId,bindingId:value.bindingId,awemeId:value.awemeId});
+  return value;
 }
 
 function commentToDomain(
@@ -559,15 +570,20 @@ export class PrismaDouyinOpsRepository
   }
 
   async createMetricSnapshot(
-    input: DouyinMetricSnapshot
+    input: DouyinMetricSnapshot,
+    fence?:import("../../application/ports/operations-write-fence.js").OperationsWriteFence
   ): Promise<DouyinMetricSnapshot> {
+    if(fence){
+      if(fence.projectId!==input.projectId)throw new DomainValidationError("运营保存权限不属于当前项目");
+      return this.db.$transaction(async tx=>{await assertOperationsWriteFence(tx,fence);return new PrismaDouyinOpsRepository(tx as PrismaClient).createMetricSnapshot(input);});
+    }
     const value = douyinMetricSnapshotSchema.parse(input);
     const prior=await this.findMetricSnapshotByCaptureKey(value.projectId,value.captureKey);
     if(prior){if(prior.bindingId!==value.bindingId||prior.awemeId!==value.awemeId||prior.contentHash!==value.contentHash)throw new DomainValidationError("同一指标采集标识不能覆盖不同作品或内容");return prior;}
     if(value.plays===undefined||value.likes===undefined||value.comments===undefined||value.shares===undefined){
       // Existing numeric SQL columns cannot encode unknown. Preserve partial observations in the existing version store, never insert fake zeroes.
       const row=await this.db.versionedEntity.upsert({where:{projectId_entityType_entityKey_version:{projectId:value.projectId,entityType:"DouyinMetricPartialSnapshot",entityKey:value.captureKey,version:1}},create:{id:value.id,projectId:value.projectId,entityType:"DouyinMetricPartialSnapshot",entityKey:value.captureKey,version:1,status:"PARTIAL",contentHash:value.contentHash,dataJson:JSON.stringify(value)},update:{}});
-      const stored=douyinMetricSnapshotSchema.parse(JSON.parse(row.dataJson));
+      const stored=partialSnapshotToDomain(row);
       if(stored.contentHash!==value.contentHash||stored.bindingId!==value.bindingId||stored.awemeId!==value.awemeId)throw new DomainValidationError("同一指标采集标识不能覆盖不同作品或内容");return stored;
     }
     const row = await this.db.douyinMetricSnapshotRecord.upsert({
@@ -621,8 +637,8 @@ export class PrismaDouyinOpsRepository
     if(row)return snapshotToDomain(row);
     const partial=await this.db.versionedEntity.findFirst({where:{projectId,entityType:"DouyinMetricPartialSnapshot",entityKey:captureKey,version:1}});
     if(!partial)return null;
-    const value=douyinMetricSnapshotSchema.parse(JSON.parse(partial.dataJson));
-    if(value.projectId!==projectId||value.captureKey!==captureKey||value.contentHash!==partial.contentHash||sha256Text(value.rawJson)!==value.contentHash)throw new DomainValidationError("部分指标观察记录校验失败");return value;
+    const value=partialSnapshotToDomain(partial);
+    if(value.projectId!==projectId||value.captureKey!==captureKey)throw new DomainValidationError("部分指标观察记录校验失败");return value;
   }
 
   async listMetricSnapshots(input: {
@@ -646,18 +662,19 @@ export class PrismaDouyinOpsRepository
         ...(limit ? { take: limit } : {})
       });
     const partials=await this.db.versionedEntity.findMany({where:{projectId:input.projectId,entityType:"DouyinMetricPartialSnapshot",...(input.awemeId?{dataJson:{contains:'"awemeId":'+JSON.stringify(input.awemeId)}}:{})},orderBy:{createdAt:"desc"},...(limit?{take:500}:{})});
-    const domain=[...rows.map(snapshotToDomain),...partials.map(row=>douyinMetricSnapshotSchema.parse(JSON.parse(row.dataJson))).filter(value=>!input.awemeId||value.awemeId===input.awemeId)].sort((a,b)=>Date.parse(a.capturedAt)-Date.parse(b.capturedAt));
+    const domain=[...rows.map(snapshotToDomain),...partials.map(partialSnapshotToDomain).filter(value=>!input.awemeId||value.awemeId===input.awemeId)].sort((a,b)=>Date.parse(a.capturedAt)-Date.parse(b.capturedAt));
     return limit?domain.slice(-limit):domain;
   }
 
   async upsertComments(
-    input: DouyinComment[],pageEvidence?:CommentPageEvidence
+    input: DouyinComment[],pageEvidence?:CommentPageEvidence,fence?:import("../../application/ports/operations-write-fence.js").OperationsWriteFence
   ): Promise<DouyinComment[]> {
     const values = input.map((item) =>
       douyinCommentSchema.parse(item)
     );
     if(!pageEvidence&&values.some(v=>v.observation?.source==="RAW_PAGE_COMPARISON"))throw new DomainValidationError("带原始来源的评论必须与原始页一起保存");
     return this.db.$transaction(async tx => {
+    if(fence){if(values.some(v=>v.projectId!==fence.projectId)||pageEvidence&&pageEvidence.projectId!==fence.projectId)throw new DomainValidationError("运营评论保存权限不属于当前项目");await assertOperationsWriteFence(tx,fence);}
     if(pageEvidence){
       const evidence=commentPageEvidenceSchema.parse(pageEvidence),audit=auditDouyinReadPage({...evidence,normalized:evidence.normalized as DouyinOpsCommentPage}),key="douyin-comment-page:"+hashValue(evidence);
       if(!audit.accepted||values.some(v=>v.projectId!==evidence.projectId||v.bindingId!==evidence.bindingId||v.awemeId!==evidence.awemeId||(v.parentCid??null)!==evidence.parentCid||v.observation?.pageEvidenceId!==key||v.observation.pageHash!==audit.rawHash||!audit.comments.some(c=>c.cid===v.cid)))throw new DomainValidationError("评论原始页证据与本次保存范围不一致");

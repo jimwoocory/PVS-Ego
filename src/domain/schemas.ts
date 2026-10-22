@@ -158,6 +158,7 @@ export const referenceVideoProfileSchema = z.object({
   reusableStylePrinciples: z.array(nonEmptyStringSchema),
   copyGuard: z.literal("STRUCTURE_AND_METHOD_ONLY"),
   observation:z.object({version:z.enum(["reference-observation-v2","reference-observation-v3"]),sourceSha256:sha256Schema,
+    samplingManifest:z.object({artifactId:entityIdSchema,sha256:sha256Schema}).optional(),
     timing:z.object({status:z.literal("DECODED_FRAME_PTS"),origin:z.literal("FIRST_VIDEO_FRAME"),precisionMs:z.literal(1)}).optional(),
     frames:z.array(z.object({artifactId:entityIdSchema,sha256:sha256Schema,timestampMs:z.number().int().nonnegative()})),
     audio:z.object({status:z.enum(["NO_TRACK","NOT_OBSERVED"]),reason:nonEmptyStringSchema}),

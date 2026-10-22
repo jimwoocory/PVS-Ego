@@ -222,11 +222,19 @@ function unknownResult(input: {
 export class DouyinAccountBindingService {
   constructor(
     private readonly publisherRuntime: DouyinBrowserPublisherRuntime,
-    private readonly opsRuntime: DouyinOpsRuntime
+    private readonly opsRuntime: DouyinOpsRuntime,
+    private readonly readOnlyOperations=false
   ) {}
 
   async inspect(opsProbe?: DouyinOpsProbe): Promise<DouyinAccountMatchResult> {
     const checkedAt = new Date().toISOString();
+    if(this.readOnlyOperations){
+      // A separately authorized read account does not require a publisher and
+      // cannot grant publication/account matching or automatic work binding.
+      try{const probe=opsProbe??await this.opsRuntime.probe();if(!probe.ready)return unknownResult({reason:"OPS_AUTH_REQUIRED",opsRuntimeStatus:probe.status,message:probe.message??"请核验运营账号",checkedAt});
+        const ops=await this.opsRuntime.identity();return {...unknownResult({reason:"PUBLISH_AUTH_REQUIRED",ops,opsAvailable:true,opsRuntimeStatus:"READY",message:"运营账号已独立核验；发布账号未接入，不确认账号一致性或自动关联发布作品。",checkedAt}),publish:{valid:false,displayName:"",platformUserId:"",runtimeStatus:"DISABLED"}};
+      }catch{return unknownResult({reason:"OPS_RUNTIME_ERROR",opsRuntimeStatus:"AUTH_REQUIRED",message:"运营账号未取得当前可核验结果",checkedAt});}
+    }
 
     let publish: DouyinBrowserAccountStatus;
     try {

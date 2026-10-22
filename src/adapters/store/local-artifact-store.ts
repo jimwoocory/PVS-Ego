@@ -61,6 +61,21 @@ export class LocalArtifactStore {
   async writeImmutable(
     input: PendingArtifactInput & { bytes: Uint8Array; mimeType?: string }
   ): Promise<ArtifactRecord> {
+    return this.publishImmutable(input, false);
+  }
+
+  /** Publish bytes after a caller has atomically reserved this artifact ID.
+   * Reservation is not recovery: existing targets are never replaced. */
+  async writeReservedImmutable(
+    input: PendingArtifactInput & { bytes: Uint8Array; mimeType?: string }
+  ): Promise<ArtifactRecord> {
+    return this.publishImmutable(input, true);
+  }
+
+  private async publishImmutable(
+    input: PendingArtifactInput & { bytes: Uint8Array; mimeType?: string },
+    reserved: boolean
+  ): Promise<ArtifactRecord> {
     const target = assertContained(this.root, input.relativePath);
     await fs.mkdir(path.dirname(target), { recursive: true });
 
@@ -68,14 +83,22 @@ export class LocalArtifactStore {
       throw new Error(`Immutable artifact already exists: ${input.relativePath}`);
     }
 
-    const pending = await this.repository.createPending({
+    const reservation: PendingArtifactInput = {
       id: input.id,
       projectId: input.projectId,
       kind: input.kind,
       relativePath: input.relativePath,
       immutable: true,
       ...(input.mimeType ? { mimeType: input.mimeType } : {})
-    });
+    };
+    const pending = reserved
+      ? await this.repository.findById(input.id)
+      : await this.repository.createPending(reservation);
+    if (!pending || pending.integrityStatus !== "PENDING" ||
+      pending.projectId !== input.projectId || pending.relativePath !== input.relativePath ||
+      pending.kind !== input.kind || pending.mimeType !== input.mimeType || !pending.immutable) {
+      throw new Error("Artifact reservation does not match publication");
+    }
     await this.inject("AFTER_PENDING");
 
     const tempPath = `${target}.${randomUUID()}.tmp`;
@@ -115,12 +138,16 @@ export class LocalArtifactStore {
     }
   }
 
-  async reconcilePending(): Promise<{ ready: string[]; missing: string[] }> {
+  async reconcilePending(): Promise<{ ready: string[]; missing: string[]; deferred?: string[] }> {
     const pending = await this.repository.listPending();
     const ready: string[] = [];
     const missing: string[] = [];
+    const deferred: string[] = [];
 
     for (const artifact of pending) {
+      // These reservations require their independently persisted digest and
+      // explicit provider finalization. File existence cannot promote them.
+      if (artifact.id.startsWith("go-local-document:")) { deferred.push(artifact.id); continue; }
       const target = assertContained(this.root, artifact.relativePath);
       try {
         const bytes = await fs.readFile(target);
@@ -136,7 +163,7 @@ export class LocalArtifactStore {
       }
     }
 
-    return { ready, missing };
+    return { ready, missing, ...(deferred.length ? { deferred } : {}) };
   }
 
   resolveArtifactPath(relativePath: string): string {
@@ -151,17 +178,20 @@ export class LocalArtifactStore {
     orphanQuarantined: Array<{ from: string; to: string }>;
     tempRemoved: string[];
     redundantRemoved: string[];
+    deferred?: string[];
   }> {
     const records = await this.repository.listByProject(projectId);
     const ready: string[] = [];
     const missing: string[] = [];
     const corrupt: string[] = [];
+    const deferred: string[] = [];
     const verifiedReadyHashes = new Set<string>();
     const known = new Set(records.map((item) => item.relativePath.replaceAll("\\", "/")));
 
     for (const artifact of records) {
       const target = assertContained(this.root, artifact.relativePath);
       if (artifact.integrityStatus === "PENDING") {
+        if (artifact.id.startsWith("go-local-document:")) { deferred.push(artifact.id); continue; }
         try {
           const bytes = await fs.readFile(target);
           const updated = await this.repository.markReady(artifact.id, {
@@ -214,6 +244,7 @@ export class LocalArtifactStore {
             .split(path.sep)
             .join("/");
           if (
+            relativeDir === "research/go-local" ||
             relativeDir === ".recovery" ||
             relativeDir.startsWith(".recovery/")
           ) {
@@ -287,7 +318,8 @@ export class LocalArtifactStore {
       orphanPaths,
       orphanQuarantined,
       tempRemoved,
-      redundantRemoved
+      redundantRemoved,
+      ...(deferred.length ? { deferred } : {})
     };
   }
 }

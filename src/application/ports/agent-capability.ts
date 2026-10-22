@@ -1,7 +1,8 @@
 import type { z } from "zod";
-import type { BusinessStage, CapabilityEffect, CapabilityResult } from "../../domain/agent-cycle.js";
+import type { BusinessStage, CapabilityEffect, CapabilityResult, LocalActionExecution } from "../../domain/agent-cycle.js";
 
-export type AgentCapabilityContext = {projectId: string; cycleId: string; actionId: string; confirmed: boolean};
+export type AgentCapabilityContext = {projectId: string; cycleId: string; actionId: string; confirmed: boolean;
+  localExecution?: {signal: AbortSignal; report(update: Omit<LocalActionExecution,"version">): void}};
 export type AgentCapability = {
   id: string; title: string; description: string; stage?: BusinessStage;
   effect: CapabilityEffect; inputSchema: z.ZodType;

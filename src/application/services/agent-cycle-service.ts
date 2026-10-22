@@ -14,8 +14,12 @@ const safeText = (error: unknown) => error instanceof Error ? error.message.slic
 
 /** Agent chooses the work; existing services enforce execution and publication invariants. */
 export class AgentCycleService {
+  private readonly activeLocal = new Map<string,{cycle:AgentCycle;action:CycleAction;controller:AbortController;checkpoint:()=>void}>();
+  private readonly advancing = new Set<Promise<AgentCycle>>();
+  private draining = false;
   constructor(readonly repository: AgentCycleRepository, readonly catalog: AgentCapabilityCatalog,
-    private readonly runtime: StructuredAiRuntime, readonly skills = new PvsAgentSkills()) {}
+    private readonly runtime: StructuredAiRuntime, readonly skills = new PvsAgentSkills(),
+    private readonly localExecutionCapabilities: ReadonlySet<string> = new Set()) {}
 
   async create(projectId: string, raw: unknown) {
     const input = agentCycleInputSchema.parse(raw);
@@ -25,8 +29,21 @@ export class AgentCycleService {
       inputHash:hashValue({projectId,input}), revision:1, status:"READY", steps:0, actions:[], evidence:[], loadedSkills:[],
       messages:[{role:"user",text:input.goal,at:now}], createdAt:now, updatedAt:now});
   }
-  get(projectId: string, id: string) { return this.repository.get(projectId,id); }
-  list(projectId?: string) { return this.repository.list(projectId); }
+  private localView(cycle:AgentCycle) {
+    const active=this.activeLocal.get(cycle.id);
+    if(active?.cycle.projectId===cycle.projectId && active.cycle.revision===cycle.revision && cycle.status==="RUNNING") {
+      const action=cycle.actions.find(a=>a.id===active.action.id && a.status==="RUNNING" && a.contextHash===active.action.contextHash);
+      if(action)action.localExecution=structuredClone(active.action.localExecution);
+    }
+    return cycle;
+  }
+  async get(projectId: string, id: string) { const cycle=await this.repository.get(projectId,id);return cycle?this.localView(cycle):null; }
+  async list(projectId?: string) { return (await this.repository.list(projectId)).map(cycle=>this.localView(cycle)); }
+  async listWorkerPage(afterId?:string){
+    if(this.repository.listWorkerPage)return this.repository.listWorkerPage(stamp(),afterId);
+    const cycles=(await this.list()).filter(c=>(!afterId||c.id>afterId)&&(!c.nextWakeAt||Date.parse(c.nextWakeAt)<=Date.now())).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0).slice(0,30);
+    return {cycles,...(cycles.length===30?{nextAfterId:cycles.at(-1)!.id}:{})};
+  }
 
   private async exclusive(projectId: string, id: string, fn: (cycle: AgentCycle, save: () => Promise<void>) => Promise<AgentCycle>) {
     await this.repository.recoverAbandoned(projectId,id);
@@ -105,18 +122,83 @@ export class AgentCycleService {
     });
   }
   async cancel(projectId:string,id:string,expectedRevision:number) {
+    // Signal only an explicitly injected, locally owned read-only execution. The
+    // lease owner alone saves its terminal result; never release a live lease.
+    const current=await this.repository.get(projectId,id),active=this.activeLocal.get(id);
+    if(current?.status==="RUNNING" && active?.cycle.projectId===projectId) {
+      if(current.revision!==expectedRevision || active.cycle.revision!==current.revision)throw new DomainValidationError("任务版本已改变");
+      const action=current.actions.find(a=>a.id===active.action.id && a.status==="RUNNING" && a.contextHash===active.action.contextHash);
+      if(!action || !active.action.localExecution || ["SUCCEEDED","CANCELLED","TIMED_OUT","FAILED"].includes(active.action.localExecution.phase))throw new DomainValidationError("本机动作已结束，请刷新后停止后续处理");
+      if(!active.controller.signal.aborted) {
+        active.action.localExecution={...active.action.localExecution,phase:"CANCELLING",version:active.action.localExecution.version+1};
+        active.checkpoint();
+        active.controller.abort();
+      }
+      return this.localView(current);
+    }
     return this.exclusive(projectId,id,async(cycle,save)=>{
       if(cycle.revision!==expectedRevision) throw new DomainValidationError("任务版本已改变");
+      const interrupted=cycle.actions.find(a=>a.status==="RUNNING"&&a.localExecution);
+      if(interrupted){
+        interrupted.status=interrupted.effect==="READ"?"FAILED":"OUTCOME_UNKNOWN";
+        interrupted.localExecution={...interrupted.localExecution!,phase:"FAILED",workerExited:false,version:interrupted.localExecution!.version+1};
+        interrupted.completedAt=stamp();interrupted.error="执行句柄已失效，仅停止后续调度，未确认工作进程退出";
+      }
       cycle.status="CANCELLED";this.message(cycle,"已停止本地后续调度；已提交远端任务不代表已取消");await save();return cycle;
     });
   }
 
-  async advance(projectId:string,id:string) {
+  /** Local launcher shutdown waits for durable terminal saves and lease release.
+   * This grants no new action permission and never cancels external providers. */
+  async drainLocalExecutions() {
+    this.draining=true;
+    for(const active of this.activeLocal.values())active.controller.abort();
+    await Promise.allSettled([...this.advancing]);
+  }
+  /** Bounded startup reconciliation, never planning, replay or permission reuse.
+   * A live lease cannot be claimed, including one held by another executor. */
+  async recoverInterruptedLocalExecutions() {
+    let afterId:string|undefined,recovered=0;
+    for(let pageNumber=0;pageNumber<100;pageNumber++){
+      const page=await this.listWorkerPage(afterId);
+      for(const candidate of page.cycles){
+        if(candidate.status!=="RUNNING"||!candidate.actions.some(a=>a.status==="RUNNING"&&a.localExecution)||this.activeLocal.has(candidate.id))continue;
+        await this.repository.recoverAbandoned(candidate.projectId,candidate.id);
+        const owner=randomUUID();if(!await this.repository.claim(candidate.projectId,candidate.id,owner))continue;
+        try{
+          const cycle=await this.repository.get(candidate.projectId,candidate.id),action=cycle?.actions.find(a=>a.status==="RUNNING"&&a.localExecution);
+          if(!cycle||cycle.status!=="RUNNING"||!action)continue;
+          const revision=cycle.revision;
+          action.status=action.effect==="READ"?"FAILED":"OUTCOME_UNKNOWN";
+          action.localExecution={...action.localExecution!,phase:"FAILED",workerExited:false,version:action.localExecution!.version+1};
+          action.completedAt=stamp();action.error="本机执行进程已中断，旧执行句柄和许可不能恢复；需核对原结果，不自动重提";
+          cycle.status=action.effect==="READ"?"BLOCKED":"OUTCOME_UNKNOWN";cycle.nextWakeAt=undefined;
+          this.message(cycle,action.error);cycle.revision++;cycle.updatedAt=stamp();await this.repository.save(cycle,revision,owner);recovered++;
+        }finally{await this.repository.release(candidate.id,owner);}
+      }
+      if(!page.nextAfterId)return {recovered,truncated:false};afterId=page.nextAfterId;
+    }
+    return {recovered,truncated:true};
+  }
+  advance(projectId:string,id:string):Promise<AgentCycle> {
+    if(this.draining)return Promise.reject(new DomainValidationError("工作台正在关闭，不能开始新动作"));
+    const step=this.advanceOnce(projectId,id);this.advancing.add(step);
+    void step.then(()=>this.advancing.delete(step),()=>this.advancing.delete(step));
+    return step;
+  }
+  private async advanceOnce(projectId:string,id:string) {
     return this.exclusive(projectId,id,async(cycle,save)=>{
       if(!["READY","RUNNING"].includes(cycle.status))return cycle;
       if(cycle.nextWakeAt && Date.parse(cycle.nextWakeAt)>Date.now())return cycle;
       const interrupted=cycle.actions.find(action=>action.status==="RUNNING");
       if(interrupted){
+        if(interrupted.localExecution){
+          interrupted.localExecution={...interrupted.localExecution,phase:"FAILED",workerExited:false,version:interrupted.localExecution.version+1};
+          interrupted.status=interrupted.effect==="READ"?"FAILED":"OUTCOME_UNKNOWN";
+          interrupted.error="本机执行进程已中断，旧执行句柄和许可不能恢复；需核对原结果，不自动重提";
+          interrupted.completedAt=stamp();cycle.status=interrupted.effect==="READ"?"BLOCKED":"OUTCOME_UNKNOWN";cycle.nextWakeAt=undefined;
+          this.message(cycle,interrupted.error);await save();return cycle;
+        }
         if(interrupted.effect==="READ"){
           interrupted.status="FAILED";interrupted.error="只读动作回执未保存，可核对本地结果后重读";cycle.status="READY";
           this.message(cycle,interrupted.error);await save();return cycle;
@@ -129,9 +211,31 @@ export class AgentCycleService {
         const capability=this.catalog.get(pending.capabilityId);
         if(consentEffects.has(pending.effect)&&!pending.confirmedAt){cycle.status="WAITING_CONFIRMATION";await save();return cycle;}
         if(pending.confirmedAt && await this.catalog.fingerprint(projectId,pending.capabilityId,pending.input)!==pending.contextHash){pending.status="FAILED";pending.error="确认后项目状态已变化";cycle.status="BLOCKED";this.message(cycle,pending.error);await save();return cycle;}
-        pending.status="RUNNING";pending.startedAt=stamp();cycle.status="RUNNING";await save();
+        pending.status="RUNNING";pending.startedAt=stamp();cycle.status="RUNNING";
+        let progressWrites=Promise.resolve(),progressError:unknown;
+        const local=this.localExecutionCapabilities.has(capability.id) && (pending.effect==="READ" || pending.effect==="HUMAN_DECISION")
+          ?{cycle,action:pending,controller:new AbortController(),checkpoint:()=>{
+            progressWrites=progressWrites.then(async()=>{if(!progressError)await save();}).catch(error=>{progressError=error;local!.controller.abort();});
+          }}:undefined;
+        if(local)pending.localExecution={phase:"CONNECTING",version:1,samples:0,workerExited:false};
+        await save();
+        if(local){this.activeLocal.set(cycle.id,local);if(this.draining)local.controller.abort();}
         try{
-          const result=await capability.run({projectId,cycleId:cycle.id,actionId:pending.id,confirmed:Boolean(pending.confirmedAt)},pending.input);
+          const result=await capability.run({projectId,cycleId:cycle.id,actionId:pending.id,confirmed:Boolean(pending.confirmedAt),
+            ...(local?{localExecution:{signal:local.controller.signal,report:(update:Omit<NonNullable<CycleAction["localExecution"]>,"version">)=>{
+              const prior=pending.localExecution!;
+              if(["SUCCEEDED","CANCELLED","TIMED_OUT","FAILED"].includes(prior.phase))return;
+              z.object({phase:z.enum(["CONNECTING","CONNECTED","OBSERVING","CANCELLING","SUCCEEDED","CANCELLED","TIMED_OUT","FAILED"]),samples:z.number().int().min(prior.samples).max(64),workerExited:z.boolean()}).strict().parse(update);
+              if(update.workerExited && !["SUCCEEDED","CANCELLED","TIMED_OUT","FAILED"].includes(update.phase))throw new DomainValidationError("非终态不能声明工作进程已退出");
+              if(local.controller.signal.aborted && !["SUCCEEDED","CANCELLED","TIMED_OUT","FAILED"].includes(update.phase))return;
+              const order:Record<string,number>={CONNECTING:0,CONNECTED:1,OBSERVING:2,CANCELLING:3,SUCCEEDED:4,CANCELLED:4,TIMED_OUT:4,FAILED:4};
+              if(order[update.phase]!<order[prior.phase]! || (update.phase==="CANCELLING"&&!local.controller.signal.aborted))throw new DomainValidationError("本机进度状态不能倒退或自行声明取消许可");
+              pending.localExecution={...update,version:prior.version+1};
+              if(update.phase!==prior.phase || update.samples===1 || Math.floor(update.samples/10)>Math.floor(prior.samples/10))local.checkpoint();
+            }}}:{})},pending.input);
+          await progressWrites;
+          if(progressError)throw progressError;
+          if(local && (!["SUCCEEDED","CANCELLED","TIMED_OUT","FAILED"].includes(pending.localExecution!.phase) || !pending.localExecution!.workerExited))throw new Error("本机执行缺少工作进程退出回执，不能确认已停止；"+result.summary);
           pending.result=result;pending.completedAt=stamp();pending.status=result.status==="OUTCOME_UNKNOWN"?"OUTCOME_UNKNOWN":result.status==="BLOCKED"?"FAILED":"SUCCEEDED";
           if(pending.effect==="MODEL"){
             try{pending.resultObservationHash=hashValue(await this.catalog.snapshot(projectId));}catch{/* The actual result is retained even when a secondary local observation is temporarily unavailable. */}
@@ -140,13 +244,19 @@ export class AgentCycleService {
           cycle.status=result.status==="OUTCOME_UNKNOWN"?"OUTCOME_UNKNOWN":result.status==="WAITING_USER"?"WAITING_USER":result.status==="BLOCKED"?"BLOCKED":"READY";
           cycle.nextWakeAt=result.status==="RUNNING"?new Date(Date.now()+15000).toISOString():undefined;
           this.message(cycle,result.summary,"agent");
+          if(local && pending.localExecution!.phase!=="SUCCEEDED") {
+            pending.status="FAILED";cycle.status=pending.localExecution!.phase==="CANCELLED"?"CANCELLED":"BLOCKED";cycle.nextWakeAt=undefined;
+          } else if(local?.controller.signal.aborted) {
+            cycle.status="CANCELLED";cycle.nextWakeAt=undefined;this.message(cycle,"本机动作先于取消完成；已停止后续调度，没有回滚已完成动作");
+          }
         }catch(error){
           pending.error=safeText(error);pending.completedAt=stamp();
           const unknown=pending.effect==="EXTERNAL_WRITE"||pending.effect==="PAID_GENERATION";
           pending.status=unknown?"OUTCOME_UNKNOWN":"FAILED";cycle.status=unknown?"OUTCOME_UNKNOWN":"READY";
+          if(local){pending.localExecution={...pending.localExecution!,phase:"FAILED",version:pending.localExecution!.version+1};cycle.status="BLOCKED";cycle.nextWakeAt=undefined;}
           this.message(cycle,`${capability.title}：${pending.error}${unknown?"。结果未知，不能重复提交":"。本次失败已记录，后续决策须根据该结果调整"}`);
         }
-        await save();return cycle;
+        try{await progressWrites;if(progressError)throw progressError;await save();return cycle;}finally{if(local)this.activeLocal.delete(cycle.id);}
       }
       if(cycle.steps>=cycle.input.maxSteps){cycle.status="BLOCKED";this.message(cycle,"达到本轮规划步数上限，已保留结果，请检查后继续新任务");await save();return cycle;}
       cycle.status="RUNNING";cycle.steps+=1;await save();
@@ -191,8 +301,8 @@ export class AgentCycleService {
 }
 
 export function startAgentCycleWorker(service:AgentCycleService,onError:(error:unknown)=>void=()=>{}) {
-  let busy=false,stopped=false;
-  const tick=async()=>{if(busy||stopped)return;busy=true;try{for(const cycle of await service.list()){if(stopped)break;try{await service.advance(cycle.projectId,cycle.id);}catch(error){onError(error);}}}catch(error){onError(error);}finally{busy=false;}};
+  let busy=false,stopped=false,afterId:string|undefined;
+  const tick=async()=>{if(busy||stopped)return;busy=true;try{const page=service.listWorkerPage?await service.listWorkerPage(afterId):{cycles:await service.list(),nextAfterId:undefined};for(const cycle of page.cycles){if(stopped)break;try{await service.advance(cycle.projectId,cycle.id);}catch(error){onError(error);}}if(!stopped)afterId=page.nextAfterId;}catch(error){onError(error);}finally{busy=false;}};
   const timer=setInterval(()=>void tick(),3000);timer.unref();
   return ()=>{stopped=true;clearInterval(timer);};
 }

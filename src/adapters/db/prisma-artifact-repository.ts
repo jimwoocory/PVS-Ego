@@ -14,6 +14,7 @@ function toDomain(row: {
   immutable: boolean;
   createdAt: Date;
 }): ArtifactRecord {
+  if (!row.immutable) throw new Error("Artifact record is not immutable");
   return {
     id: row.id,
     projectId: row.projectId,
