@@ -96,7 +96,7 @@
 | 016 | [execution/go-ego-bridge/worker.mjs](../execution/go-ego-bridge/worker.mjs) | 固定程序静态 | 固定 SDK 程序只面向 nonce 自有页；控制权/布局诊断非授权 | H1,H2,H4 |
 | 017 | [package.json](../package.json) | 脚本契约 | 仅显式定向脚本；默认 test/启动/模型/守卫策略未扩大 | C1 构建/运行入口 |
 | 018 | [scripts/run-evidence-review-isolated.mjs](../scripts/run-evidence-review-isolated.mjs) | 运行器静态 | 原只读 HTTP、保存证据和浏览器分层；不触发新采集；会话/env/参数/子进程退出/最终回执 | H3 |
-| 019 | [scripts/run-go-bridge-isolated.mjs](../scripts/run-go-bridge-isolated.mjs) | 运行器静态 | 原 Agent 具体确认、scope、固定本机 Go 执行与终态；会话/env/参数/子进程退出/最终回执 | H1 |
+| 019 | [scripts/run-go-bridge-isolated.mjs](../scripts/run-go-bridge-isolated.mjs) | 运行器差异及失败路径 | 原门禁/退出保持；执行前12源码摘要及失败回执，成功前变化拒绝 | C12 7/2失败；成功门槛未触发 |
 | 020 | [scripts/run-go-capture-durability.mjs](../scripts/run-go-capture-durability.mjs) | 运行器静态 | 占位竞争、文件已发布后异常及显式恢复，新空库固定采集；会话/env/参数/子进程退出/最终回执 | H2 |
 | 021 | [scripts/run-go-lifecycle-durability.mjs](../scripts/run-go-lifecycle-durability.mjs) | 运行器静态 | 原 Agent 生命周期、保存进度、故障退出与死租约；会话/env/参数/子进程退出/最终回执 | H2 |
 | 022 | [scripts/run-go-research-isolated.mjs](../scripts/run-go-research-isolated.mjs) | 运行器静态 | 本地动态正文到原 Research/Evidence，新库与独立宿主；会话/env/参数/子进程退出/最终回执 | H2 |
@@ -311,6 +311,10 @@ Tabbit创建标签时协议拒绝，未执行页面操作，空闲空任务已�
 | N37 | [execution/go-ego-bridge/lifetime_windows.go](../execution/go-ego-bridge/lifetime_windows.go) | Windows原生Job | 144字节布局、执行前自加入、最后句柄关闭回收后代；失败即拒绝 | C11实际Windows |
 | N38 | [execution/go-ego-bridge/lifetime_other.go](../execution/go-ego-bridge/lifetime_other.go) | 非Windows显式拒绝 | 无验证过的进程保护则执行前阻断；非Windows未运行 | 静态复核 |
 
+## C12 新增保护后的 Go 桥完整套件尝试
+
+2026-10-22唯一`test:go-bridge`最终7 PASS/2 FAIL、退出1，构建及Go编译退出0。实际Go/CLI/SDK/新宿主与内存业务仓库的7个非UI子项通过，4类记录的自有子进程退出0。原生UI被自动审批拒绝，其子项及父项失败，无最终PASS；不把本轮称完整通过。019运行器补存12源码摘要及失败快照，测试/业务/Go保护/原守卫未改。先前同样阻断7/2保留，不累计。公开集合仍151项。详情见[C12记录](PUBLIC-CHANGE-REVIEW-2026-10-21.md#pr-1-c12-新增进程保护后的-go-桥重验)。
+
 ## 明确剩余未验收项
 
 | 编号 | 尚缺证据 | 当前边界与下一步 |
@@ -323,7 +327,7 @@ Tabbit创建标签时协议拒绝，未执行页面操作，空闲空任务已�
 | R6 | U3 真实编辑态、真实上传/提交与可信作品回执 | 真实编辑态仍 BLOCKED；本机文件状态替身不能证明上传，原成片占位不自动释放，预检/归还不等于发布授权 |
 | R7 | U4 当前新片真实账号下的指标/评论有界采集 | 固定读取/新库不代表当前真实观察；保留真实父评论第二页历史，不拼接成新片闭环，无回复权限扩张 |
 | R8 | U5 真实待审建议的明确采用及后续作品效果 | 未实际采用；相关性不能当因果或商业效果，采用也不授予付费生成/发布/回复许可 |
-| R9 | 非Windows、完整业务组合CI与新增保护后的旧Go三套件 | C5补Windows边界CI；C6/C7/C8历史Go桥9/9、研究6/6、U1 10/10分轮完成，C11修改Go入口后尚未重跑这三个完整套件。非Windows明确拒绝；本机Go未加入CI |
+| R9 | 非Windows、完整业务组合CI与新增保护后的Go完整验收 | C12桥重验7/2失败，原生UI仍阻断；研究/U1尚未重跑，下一轮先研究再U1。C6/C7/C8的9/9、6/6、10/10只是历史；非Windows明确拒绝，本机Go未加入CI |
 | R10 | GitHub账号的独立审核批准 | C5独立静态代码审查与F9复审已完成，首个CI已通过；仍未取得GitHub Approve，不能称正式批准或全部验收。当前head需看对应检查，本PR不合并部署 |
 
 原配置、DB、媒体、浏览器账号、日志、原始证据及私有历史不随清单提交。原守卫与默认真实执行拒绝保持；原服务不停止或重启。清单完成表示已登记上述复核范围和缺口，不表示 R1–R10 已完成。
