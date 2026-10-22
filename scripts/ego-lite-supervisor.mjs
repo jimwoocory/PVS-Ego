@@ -48,13 +48,20 @@ export async function startWorkbench({env,installation=loadInstallation(),opsFix
     if(!run||run.projectId!==r.projectId||run.status!=='RUNNING'||run.mode!=='BASIC'||run.goal!==a.input.goal||JSON.parse(run.queriesJson).length||JSON.parse(run.sourceUrlsJson).length!==1||JSON.parse(run.sourceUrlsJson)[0].url!==sourceUrl||JSON.parse(run.browserStateJson??'{}').collectionOnly!==true)throw Error('EGO_LITE_RESEARCH_SCOPE_DENIED');
     return actionKey(request.scope);
   }
-  async function initialize(key,runId){
+  async function initialize(key,runId,request){
     if(stopping||completedScopes.has(key)||completedScopes.size>=256)throw Error('EGO_LITE_SCOPE_ALREADY_CLOSED');
     if(active){if(active.key!==key||active.runId!==runId||active.finishing)throw Error('EGO_LITE_BUSY');return active.ready;}
     const local=active={key,runId,pending:new Map(),waitingIds:new Set(),ids:new Set(),requests:0,cancelled:false,dir:path.join(session,'go-bridge-action-'+randomUUID())};
     fs.mkdirSync(local.dir,{recursive:true});fs.mkdirSync(path.join(local.dir,'evidence'));
+    // Full pin I/O yields to cancellation, shutdown and durable scope changes.
+    // Recheck before either owned process is created, not only before Go input.
+    const assertLaunchAllowed=()=>{
+      if(stopping||local.cancelled||local.finishing||active!==local)throw Error('EGO_LITE_CANCELLED_BEFORE_HOST');
+      if(permit(request)!==key)throw Error('EGO_LITE_ACTION_SCOPE_DENIED');
+    };
     local.ready=(async()=>{
       if(JSON.stringify(await loadInstallationAsync())!==JSON.stringify(installation)||digest(path.join(root,'.runtime/ego-lite-installation.json'))!==fingerprint)throw Error('EGO_LITE_INSTALLATION_CHANGED');
+      assertLaunchAllowed();
       const stop=path.join(local.dir,'stop'),entry=path.join(local.dir,'host.mjs'),heartbeat=path.join(local.dir,'supervisor-heartbeat');local.stopFile=stop;
       fs.writeFileSync(heartbeat,String(process.pid));local.heartbeat=setInterval(()=>{try{fs.writeFileSync(heartbeat,String(process.pid));}catch{clearInterval(local.heartbeat);}},500);
       fs.writeFileSync(entry,`import {app} from 'electron';import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';app.on('session-created',s=>{s.webRequest.onBeforeRequest((d,cb)=>{let allow=false;try{const u=new URL(d.url);if(u.protocol==='file:'){const rel=path.relative(${JSON.stringify(path.dirname(installation.hostMain))},fileURLToPath(u));allow=rel!==''&&!rel.startsWith('..')&&!path.isAbsolute(rel);}else allow=u.href==='about:blank'||(d.method==='GET'&&u.href===${JSON.stringify(sourceUrl)});}catch{}cb({cancel:!allow});});s.on('will-download',(event,item)=>{event.preventDefault();item.cancel();});});const parentAlive=()=>{try{process.kill(${process.pid},0);return Date.now()-fs.statSync(${JSON.stringify(heartbeat)}).mtimeMs<5000;}catch{return false;}};const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(stop)})||!parentAlive()){clearInterval(timer);app.quit();}},100);await import(${JSON.stringify(pathToFileURL(installation.hostMain).href)});`);
@@ -66,6 +73,7 @@ export async function startWorkbench({env,installation=loadInstallation(),opsFix
       });
       await until(()=>local.host.stdout.includes('EGO_WINDOWS_HOST_READY')||local.host.closed,'EGO_LITE_HOST_START_TIMEOUT',30000);
       if(local.host.closed)throw Error('EGO_LITE_HOST_START_FAILED');
+      assertLaunchAllowed();
       const host=JSON.parse(fs.readFileSync(path.join(local.dir,'host/host-instance.json'),'utf8'));
       const pin=file=>installation.pins.find(p=>p.file===file).sha256;
       const cfg={contract:'pvs-go-ego-local-v1',session:local.dir,node:installation.node,nodeSha256:pin(installation.node),cli:installation.cli,cliSha256:pin(installation.cli),sdk:installation.sdk,sdkSha256:pin(installation.sdk),dataDir:path.join(local.dir,'host'),instanceId:'windows-host:'+host.instanceId,origin,nonce};
@@ -82,7 +90,10 @@ export async function startWorkbench({env,installation=loadInstallation(),opsFix
       });
       local.bridge.p.once('close',()=>{if(!local.finishing)local.failureCode??='EGO_LITE_BRIDGE_DISCONNECTED';for(const requestId of local.pending.keys())send({egoLiteError:{id:requestId,code:'EGO_LITE_BRIDGE_CLOSED'}});local.pending.clear();});
       await until(()=>local.bridgeReady||local.bridge.closed,'EGO_LITE_BRIDGE_START_TIMEOUT');if(local.bridge.closed)throw Error('EGO_LITE_BRIDGE_START_FAILED');
-    })();return local.ready;
+    })().catch(error=>{
+      local.failureCode??=/^EGO_LITE_[A-Z_]{1,70}$/.test(error.message)?error.message:'EGO_LITE_INITIALIZATION_FAILED';
+      throw Error(local.failureCode);
+    });return local.ready;
   }
   function finish(){
     const local=active;if(!local)return Promise.resolve({workerExited:true,clean:true});
@@ -111,7 +122,7 @@ export async function startWorkbench({env,installation=loadInstallation(),opsFix
     if(message?.egoLiteRequest){void(async()=>{
       const r=message.egoLiteRequest;
       try{
-        const key=permit(r),ready=initialize(key,r.researchRunId);
+        const key=permit(r),ready=initialize(key,r.researchRunId,r);
         if(active?.key===key&&active.runId===r.researchRunId)active.waitingIds.add(r.id);
         await ready;if(!active||active.key!==key||active.runId!==r.researchRunId||active.cancelled||active.finishing){send({egoLiteError:{id:r.id,code:'EGO_LITE_CANCELLED_BEFORE_WORKER',workerExited:true}});return;}
         active.waitingIds.delete(r.id);
