@@ -1,8 +1,8 @@
 # PR #1 逐文件审查覆盖清单
 
-审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录代替文件**。C1/C2/C3各新增3项，C4再新增8项，C5新增CI workflow及首次进入PR差异的原边界套件共2项，C8新增本地测试说明1项，C9新增定向运行器与两个测试文件3项，C10新增7项，C11新增8项，C13新增12项，本轮待提交公开范围为 **163 项**。新增项在末表单独列出，已修改的原文件仍计入原113项；提交后再核对GitHub集合。
+审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录代替文件**。C1/C2/C3各新增3项，C4再新增8项，C5新增CI workflow及首次进入PR差异的原边界套件共2项，C8新增本地测试说明1项，C9新增定向运行器与两个测试文件3项，C10新增7项，C11新增8项，C13新增12项后为163项，C17新增2项；截至C21当前公开差异为 **165 项**。新增项在末表单独列出，已修改的原文件仍计入原113项；提交后再核对GitHub集合。
 
-这是指定深度的静态审查与证据索引，**不是163个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。worker运行证据以C4为准；后续专项均分轮单独运行，不能拼接成完整平台E2E。C5另有全新独立审查者静态复核，范围与限制见末表及分轮记录。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
+这是指定深度的静态审查与证据索引，**不是165个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。worker运行证据以C4为准；后续专项均分轮单独运行，不能拼接成完整平台E2E。C5另有全新独立审查者静态复核，范围与限制见末表及分轮记录。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
 
 ## C1 前轮补漏与限定运行证据
 
@@ -100,7 +100,7 @@
 | 020 | [scripts/run-go-capture-durability.mjs](../scripts/run-go-capture-durability.mjs) | 运行器静态 | 占位竞争、文件已发布后异常及显式恢复，新空库固定采集；会话/env/参数/子进程退出/最终回执 | H2 |
 | 021 | [scripts/run-go-lifecycle-durability.mjs](../scripts/run-go-lifecycle-durability.mjs) | 运行器静态 | 原 Agent 生命周期、保存进度、故障退出与死租约；会话/env/参数/子进程退出/最终回执 | H2 |
 | 022 | [scripts/run-go-research-isolated.mjs](../scripts/run-go-research-isolated.mjs) | 运行器及实际复验 | 本地动态正文到原 Research/Evidence，新库与独立宿主；退出0后最终回执，8项源码SHA核对 | H2,C20 6/6 |
-| 023 | [scripts/run-go-u1-session.mjs](../scripts/run-go-u1-session.mjs) | 运行器静态 | 明确独立宿主/原 Space 会话、隐藏与控制变化，非真人登录；会话/env/参数/子进程退出/最终回执 | H4 |
+| 023 | [scripts/run-go-u1-session.mjs](../scripts/run-go-u1-session.mjs) | 运行器及完整复验 | 独立宿主/原Space；五进程及套件退出0后最终回执，11源码SHA核对，非真人登录 | H4,C21 10/10 |
 | 024 | [scripts/run-pr1-go-receipt.mjs](../scripts/run-pr1-go-receipt.mjs) | 运行器静态 | 固定 JSONL 协议、截图路径与 source-only 重定向续接；会话/env/参数/子进程退出/最终回执 | H12 |
 | 025 | [scripts/run-pr1-research-cache.mjs](../scripts/run-pr1-research-cache.mjs) | 运行器静态 | 缓存完整性、损坏元数据、原只读 HTTP 与固定采集端；会话/env/参数/子进程退出/最终回执 | H11 |
 | 026 | [scripts/run-pr1-resume-atomic.mjs](../scripts/run-pr1-resume-atomic.mjs) | 运行器静态 | 原父子版本/范围/租约冲突与真实事务回滚夹具；会话/env/参数/子进程退出/最终回执 | H10 |
@@ -172,8 +172,8 @@
 | 092 | [tests/go-lifecycle-durable-fixture.ts](../tests/go-lifecycle-durable-fixture.ts) | 结构/边界/证据声明 | 原 Agent 生命周期、保存进度、故障退出与死租约 | H2 |
 | 093 | [tests/go-research-chain-fixture.ts](../tests/go-research-chain-fixture.ts) | 结构及完整链复验 | 实际Prisma/Research/Evidence；确认、跨scope、摘要/搜索拒绝、幂等和重启后复用 | H2,C20 |
 | 094 | [tests/go-research-isolated.test.mjs](../tests/go-research-isolated.test.mjs) | 结构及完整套件复验 | 动态正文/篡改拒绝/业务重启/断连；固定采集不覆盖默认监督异步pin | H2,C20 6/6 |
-| 095 | [tests/go-u1-session-fixture.ts](../tests/go-u1-session-fixture.ts) | 结构/边界/证据声明 | 明确独立宿主/原 Space 会话、隐藏与控制变化，非真人登录 | H4 |
-| 096 | [tests/go-u1-session-isolated.test.mjs](../tests/go-u1-session-isolated.test.mjs) | 结构/边界/证据声明 | 明确独立宿主/原 Space 会话、隐藏与控制变化，非真人登录 | H4 |
+| 095 | [tests/go-u1-session-fixture.ts](../tests/go-u1-session-fixture.ts) | 结构及完整链复验 | 实际Prisma/原Ego provider、绑定/回执/PNG摘要、续接与跨scope拒绝；部分来源替身单列 | H4,C21 |
+| 096 | [tests/go-u1-session-isolated.test.mjs](../tests/go-u1-session-isolated.test.mjs) | 结构及完整套件复验 | 专用宿主/隐藏Space/模拟控制/业务与宿主重启；真人归还和默认监督初始化不在范围 | H4,C21 10/10 |
 | 097 | [tests/pr1-go-receipt-fixture.ts](../tests/pr1-go-receipt-fixture.ts) | 结构/边界/证据声明 | 固定 JSONL 协议、截图路径与 source-only 重定向续接 | H12 |
 | 098 | [tests/pr1-go-receipt-isolated.test.mjs](../tests/pr1-go-receipt-isolated.test.mjs) | 结构/边界/证据声明 | 固定 JSONL 协议、截图路径与 source-only 重定向续接 | H12 |
 | 099 | [tests/pr1-research-cache-fixture.ts](../tests/pr1-research-cache-fixture.ts) | 结构/边界/证据声明 | 缓存完整性、损坏元数据、原只读 HTTP 与固定采集端 | H11 |
@@ -348,7 +348,7 @@ Tabbit创建标签时协议拒绝，未执行页面操作，空闲空任务已�
 | R6 | U3 真实编辑态、真实上传/提交与可信作品回执 | 真实编辑态仍 BLOCKED；本机文件状态替身不能证明上传，原成片占位不自动释放，预检/归还不等于发布授权 |
 | R7 | U4 当前新片真实账号下的指标/评论有界采集 | 固定读取/新库不代表当前真实观察；保留真实父评论第二页历史，不拼接成新片闭环，无回复权限扩张 |
 | R8 | U5 真实待审建议的明确采用及后续作品效果 | 未实际采用；相关性不能当因果或商业效果，采用也不授予付费生成/发布/回复许可 |
-| R9 | 非Windows、完整业务组合CI与新增保护后的Go完整验收 | C19桥完整重验9/9通过，限本轮合成页原生点击；C18的7/2历史保留。C20研究完整重验6/6通过；U1尚未重跑，下一轮仅U1。默认监督异步pin初始化未由这两套件覆盖。C6/C7/C8的9/9、6/6、10/10只是历史；非Windows明确拒绝，本机Go未加入CI |
+| R9 | 非Windows、完整业务组合CI与新增保护后的Go完整验收 | C19桥完整重验9/9通过，限本轮合成页原生点击；C18的7/2历史保留。C20研究6/6、C21会话10/10逐轮完整重验通过，不累计全量/E2E。默认监督异步pin初始化未由三套件覆盖，下一优先为实际默认工作台路径。C6/C7/C8的9/9、6/6、10/10只是历史；非Windows明确拒绝，本机Go未加入CI |
 | R10 | GitHub账号的独立审核批准 | C5独立静态代码审查与F9复审已完成，首个CI已通过；仍未取得GitHub Approve，不能称正式批准或全部验收。当前head需看对应检查，本PR不合并部署 |
 
 原配置、DB、媒体、浏览器账号、日志、原始证据及私有历史不随清单提交。原守卫与默认真实执行拒绝保持；原服务不停止或重启。清单完成表示已登记上述复核范围和缺口，不表示 R1–R10 已完成。
@@ -416,3 +416,10 @@ C17最终构建退出0，唯一test:ego-lite-douyin-read **36 PASS/0 FAIL（35�
 以8545fba为基线，构建及离线Go编译退出0；唯一test:go-research **6 PASS / 0 FAIL、退出0、9276.3506ms**。实际Go/原CLI/SDK/新Ego实例与空白SQLite/Prisma参与：1131字节动态正文、1条Evidence、38桥事件/3次合成GET，8回执源码SHA匹配。确认/跨scope/幂等/篡改拒绝、进程重启后复用、宿主断连无重试或伪证据及取消/超时通过；四个记录应用子进程正常退出且PID消失。新库活租约/摘要/模型执行/生成/发布/回复记录为0；断连失败保留1个PENDING占位，不算Evidence。
 
 未发现新确认产品缺陷，仅更新四份公开文档，165项覆盖集合不变。套件固定采集链不经过默认工作台监督进程，C17共享异步pin初始化仍待该路径专项验证；本轮无原生点击、截图、真人归还或平台E2E。下一轮仅test:go-u1-session；原宿主退出根因、长期稳定性及其余外部缺口保留。模型/隔离/人工确认边界保持，未发布、回复、合并或部署。详见[本轮完整记录](PUBLIC-CHANGE-REVIEW-2026-10-21.md#pr-1-c20-go-research-完整隔离重验)。
+
+
+## C21 U1 session 完整隔离重验（2026-10-22）
+
+以afef6fd为基线，构建及离线Go编译退出0；唯一test:go-u1-session **10 PASS / 0 FAIL、退出0、13453.4391ms**。实际Go/原CLI/SDK/专用Ego与新SQLite/Prisma参与。隐藏Space、原run续接、模拟接管/归还、跨scope拒绝、业务重启复用及宿主重启后旧绑定失效通过；83事件/4合成GET、11源码SHA匹配，5个记录应用进程正常退出且PID消失。3run/4Evidence包含2实际本机DOM及2无网络部分来源替身；4READY artifact摘要核对、2张1264×678/47777字节PNG目视核验，活租约/模型/摘要/生成/发布/回复记录0。
+
+未发现新确认产品缺陷，仅更新四份公开文档，当前165项覆盖集合不变。原Shell控制仍由测试包装器模拟，真人登录/验证码/归还及平台E2E未运行；C19桥9/9、C20研究6/6与C21会话10/10逐轮独立，不累计。默认监督异步pin初始化尚未覆盖，下一优先建议单独test:ego-lite-workbench；宿主历史根因、长期稳定性及其余外部缺口保留。模型/隔离/人工确认边界保持，未发布、回复、合并或部署。详见[完整分轮记录](PUBLIC-CHANGE-REVIEW-2026-10-21.md#pr-1-c21-u1-session-完整隔离重验)。

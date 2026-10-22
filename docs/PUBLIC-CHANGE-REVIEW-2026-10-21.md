@@ -336,3 +336,18 @@ Go构建、套件和四个记录应用子进程（宿主、Go桥、重启前后�
 范围限制：本套件使用固定GoLocalResearchProvider，不经过默认工作台监督进程；因此C17共享监督初始化的异步完整pin路径仍未由本套件验收。生产默认工厂/原生工作台点击、截图和真人接管/归还本轮未运行；前轮C19桥原生点击9/9独立保留，不拼成同一次E2E。没有真实平台或账号读取，没有模型、外发、付费生成、上传、发布、回复、原3090操作、合并或部署。
 
 下一轮优先test:go-u1-session完整隔离套件，仍单轮一个套件。另保留默认监督异步pin初始化路径、C16原宿主退出原因、真实第二页/预取/虚拟列表/图集/隐藏指标/风控、小时天级/睡眠断电/完整OS审计、其余U2–U5及GitHub正式独立Approve未验收；本轮6/6不代替这些结果。库、配置、profile、原始日志和正文证据仅在私有.runtime保留。
+
+
+## PR #1 C21 U1 session 完整隔离重验
+
+2026-10-22以afef6fd为基线，构建与离线Go编译退出0；本轮唯一test:go-u1-session完整套件 **10 PASS / 0 FAIL（9子项及父项）、退出0、13453.4391ms**。实际Go1.26.9、原CLI/SDK、专用Ego宿主/profile及迁移新建空白SQLite/Prisma参与，仅固定本机合成页面；未复制已有配置、项目或账号。未发现新的已确认产品缺陷，未改产品、运行器、守卫或测试断言，本轮只更新四份公开验收文档。
+
+原Agent未确认及旧版本拒绝后，原Ego研究提供者保存动态正文与真实视口PNG。第二个隐藏Space要求截图时明确SPACE_HIDDEN且保留同一opaque会话；测试包装器通过原Shell模拟选择后，仅续原BASIC run，不多开Space。模拟接管时拒绝缓存读取，明确模拟归还后复用原页；错误项目/handle/URL/run及非法transport操作拒绝。业务进程重启后重载原绑定和核验后的artifact、不重新open或采集；宿主重启后HOST_INSTANCE_CHANGED、旧引用/许可失效，不自动认领、重开或重试，两个Space保持user ownership。
+
+83个桥事件、4次固定合成GET、10条原Shell状态/模拟动作回执；11项回执源码SHA与当前文件匹配。两次宿主、Go桥、重启前后业务进程共5个记录子进程closed/退出0且PID均已消失；Go构建及套件退出0。新库3研究run、4条Evidence，其中2条来自实际本机Ego DOM，另2条来自无网络的部分来源替身，只续缺项共3次替身fetch；不能称4条都为真实页面采集。4个READY artifact均核对摘要；两个实际PNG各1264×678、47777字节，SHA相同，已目视核验合成标题和动态正文。
+
+只读核验2个BLOCKED Agent周期、活租约0；模型provider/execution、摘要brief、生成request/attempt、发布attempt和回复write-intent均0。controlActions仍为SYNTHETIC_ORIGINAL_SHELL_BRIDGE；真人原生点击、登录/验证码/归还、真实平台E2E均NOT_RUN，不能用测试包装器动作替代人工确认验收。模型aihubmix/deepseek-v4.1-flash、音频NOT_OBSERVED、费用UNKNOWN不变；原Agent确认门禁保持。
+
+C19桥9/9、C20研究6/6和本轮C21会话10/10现已按轮分别重验，不累计为全量或平台E2E。三套件均不经过默认监督进程的异步完整pin初始化；下一优先建议单独test:ego-lite-workbench重验该实际默认路径，本轮未运行。仍缺C16原宿主退出根因、小时天级/睡眠断电/完整OS审计、真实第二页/预取/虚拟列表/图集/隐藏指标/风控、默认运营工作台完整视觉与真人控制流程，其余U2–U5及GitHub正式独立Approve。
+
+原3090及原Ego源码保持；没有模型/外部检索/素材外发/付费生成/上传/发布/回复、合并或部署。库、配置、profile、原始日志、会话/PNG/正文证据仅留私有.runtime，不进入公开Git。
