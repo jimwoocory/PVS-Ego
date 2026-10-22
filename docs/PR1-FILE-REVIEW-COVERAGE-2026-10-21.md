@@ -359,3 +359,10 @@ Tabbit创建标签时协议拒绝，未执行页面操作，空闲空任务已�
 公开集合仍163项；重新审查scripts/ego-lite-douyin-supervisor.mjs、execution/go-ego-bridge/ops-worker.mjs、src/application/ports/ego-lite-douyin-read.ts、src/adapters/douyin/ego-lite-douyin-read-runtime.ts、tests/ego-lite-douyin-read.test.mjs及五份本轮公开说明。F21修复运营宿主隐藏启动并要求固定shell可见回执；F22将读取失败限制为枚举阶段/原因及可选HTTP状态，响应原文/凭据不进入结果。只影响本仓库运营宿主，不接管用户Space或放宽网络策略。
 
 唯一专项最终16/16、退出0、34368.209ms；19个子进程正常退出，36个捕获PID消失，22次合成GET，21项源码摘要匹配。测试平台响应仍为合成；真实证据另行记录：用户看到窗口、手动登录/归还控制，实际身份READY；本人作品GET返回空响应，WORKS/EMPTY_RESPONSE、NOT_READ，未取得真实作品/指标。旧Go三个完整套件及其他历史未验收边界保留。
+
+
+### C15 本人页面新响应与实际作品指标
+
+集合仍163项。重新审查execution/go-ego-bridge/ops-worker.mjs、src/adapters/douyin/ego-lite-douyin-read-runtime.ts、src/application/ports/ego-lite-douyin-read.ts、tests/ego-lite-douyin-read.test.mjs及五份公开说明。F23删除失效自拼作品请求，原SDK只接受当前Page新事件中本人/第一页/有界条数固定GET响应，不复制请求URL/凭据或生成签名；读前后身份、作者、响应体上限、无新响应不复用/不回退以及PAGE_RESPONSE业务schema核验。原网络策略/宿主源及人工门禁不变。
+
+唯一专项最终19/19、退出0、72073.0328ms，29子进程退出0、56捕获PID消失、36合成GET、21源码SHA匹配。负例拒绝其他账号、后续页、超量和外来作者，无新请求不拼接/复用；两次9/2及中间16/16分开保留。实际独立会话读取5条本人作品/25个返回指标值，双运营页面回显、原Agent确认/worker退出/租约释放及不可变证据SHA/归属核验。真实资料仅留本地。旧Go完整套件、完整原生点击/视觉和其他历史未验收边界继续保留。

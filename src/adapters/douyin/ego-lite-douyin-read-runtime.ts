@@ -7,10 +7,10 @@ import {metricKeys,metricAvailabilitySchema} from "../../domain/douyin-observati
 const identity=z.object({uid:z.string().regex(/^[1-9]\d{0,39}$/),secUid:z.string().max(200),uniqueId:z.string().max(100),shortId:z.string().max(100),nickname:z.string().max(100)}).strict();
 const metrics=z.object({plays:z.number().int().nonnegative().optional(),likes:z.number().int().nonnegative().optional(),comments:z.number().int().nonnegative().optional(),shares:z.number().int().nonnegative().optional(),collects:z.number().int().nonnegative().optional()}).strict();
 const work=z.object({awemeId:z.string().regex(/^\d{8,30}$/),description:z.string().max(2000),publishedAt:z.string().datetime().nullable(),author:identity.omit({shortId:true}),metrics,metricAvailability:metricAvailabilitySchema,durationMs:z.number().int().nonnegative(),coverUrl:z.literal(""),externalUrl:z.string().url()}).strict();
-const failure=z.object({stage:z.enum(["IDENTITY","IDENTITY_BEFORE","WORKS","IDENTITY_AFTER"]),reason:z.enum(["HTTP_ERROR","RESPONSE_TOO_LARGE","EMPTY_RESPONSE","INVALID_JSON","TIMEOUT","NETWORK_ERROR","READ_FAILED"]),httpStatus:z.number().int().min(100).max(599).optional()}).strict();
+const failure=z.object({stage:z.enum(["IDENTITY","IDENTITY_BEFORE","WORKS","IDENTITY_AFTER"]),reason:z.enum(["HTTP_ERROR","RESPONSE_TOO_LARGE","EMPTY_RESPONSE","INVALID_JSON","TIMEOUT","NETWORK_ERROR","NATIVE_REQUEST_NOT_OBSERVED","READ_FAILED"]),networkCode:z.enum(["net::ERR_EMPTY_RESPONSE","net::ERR_ABORTED","net::ERR_BLOCKED_BY_CLIENT","net::ERR_BLOCKED_BY_ORB","net::ERR_FAILED","OTHER"]).optional(),httpStatus:z.number().int().min(100).max(599).optional()}).strict();
 const failureStages:Record<string,string>={IDENTITY:"账号核验",IDENTITY_BEFORE:"读取前账号核验",WORKS:"本人作品读取",IDENTITY_AFTER:"读取后账号核验"};
-const failureReasons:Record<string,string>={HTTP_ERROR:"平台拒绝或未完成请求",RESPONSE_TOO_LARGE:"响应超过读取上限",EMPTY_RESPONSE:"平台返回空响应",INVALID_JSON:"平台未返回有效数据",TIMEOUT:"平台请求超时",NETWORK_ERROR:"网络请求失败",READ_FAILED:"未取得可核验数据"};
-const resultSchema=z.object({status:z.enum(["READY","AUTH_REQUIRED","CONTROL_USER","RISK_CONTROL","PROVIDER_ERROR","SESSION_EXPIRED","ACCOUNT_CHANGED","DATA_UNAVAILABLE"]),source:z.enum(["LIVE_DOUYIN","LOCAL_FIXTURE_ONLY"]),checkedAt:z.string().datetime(),identity:identity.optional(),failure:failure.optional(),works:z.array(work).max(20).optional()}).strict();
+const failureReasons:Record<string,string>={HTTP_ERROR:"平台拒绝或未完成请求",RESPONSE_TOO_LARGE:"响应超过读取上限",EMPTY_RESPONSE:"平台返回空响应",INVALID_JSON:"平台未返回有效数据",TIMEOUT:"平台请求超时",NETWORK_ERROR:"网络请求失败",NATIVE_REQUEST_NOT_OBSERVED:"本人页面尚未提供可核验的第一页作品响应",READ_FAILED:"未取得可核验数据"};
+const resultSchema=z.object({status:z.enum(["READY","AUTH_REQUIRED","CONTROL_USER","RISK_CONTROL","PROVIDER_ERROR","SESSION_EXPIRED","ACCOUNT_CHANGED","DATA_UNAVAILABLE"]),source:z.enum(["LIVE_DOUYIN","LOCAL_FIXTURE_ONLY"]),checkedAt:z.string().datetime(),identity:identity.optional(),failure:failure.optional(),readMethod:z.literal("PAGE_RESPONSE").optional(),works:z.array(work).max(20).optional()}).strict();
 const messages:Record<string,string>={NOT_CONNECTED:"尚未打开本仓库的独立 Ego Lite 运营会话。",READY:"账号已核验；页面只显示上次明确读取的结果。",AUTH_REQUIRED:"独立会话已打开。请在 Ego Lite 手动登录；登录后归还 Agent 控制，再准备核验账号。",CONTROL_USER:"用户仍持有页面控制。请在 Ego Lite 明确归还 Agent，再准备新的核验动作。",RISK_CONTROL:"平台要求验证，已停止读取；请手动处理，不自动重试。",PROVIDER_ERROR:"页面读取失败，未确认账号或数据；保留未知，不自动重试。",SESSION_EXPIRED:"运营会话已断开或重启，旧动作许可不能继续。",ACCOUNT_CHANGED:"实际账号与确认的 UID 不一致，已停止并清空本次作品结果。",DATA_UNAVAILABLE:"未取得可核验的作品数据，不能解释为零作品或零指标。"};
 
 /** Business process cache only. GET/probe never starts a browser or reads a site. */
@@ -42,6 +42,7 @@ export class EgoLiteDouyinReadRuntime implements EgoLiteDouyinReadPort {
       if(value.source!==this.state.source)throw new DouyinOpsRuntimeError("PROTOCOL_ERROR","真实平台与合成证据类型不一致");
       if(value.status==="READY"&&value.failure)throw new DouyinOpsRuntimeError("PROTOCOL_ERROR","成功结果不能夹带失败诊断");
       if(value.status==="READY"&&!value.identity)throw new DouyinOpsRuntimeError("PROTOCOL_ERROR","未提供可核验的账号 UID");
+      if(input.operation==="works"&&value.status==="READY"&&value.readMethod!=="PAGE_RESPONSE")throw new DouyinOpsRuntimeError("PROTOCOL_ERROR","缺少本人页面新响应的读取方式证据");
       const works=value.works??[];
       if(input.operation!=="works"&&works.length)throw new DouyinOpsRuntimeError("PROTOCOL_ERROR","账号核验动作不能顺带采集作品");
       if(input.operation==="works"&&value.status==="READY"&&value.identity?.uid!==input.expectedAccountUid)throw new DouyinOpsRuntimeError("ACCOUNT_CHANGED","返回账号与本次确认不一致");
@@ -52,7 +53,7 @@ export class EgoLiteDouyinReadRuntime implements EgoLiteDouyinReadPort {
       }
       if(value.status!=="READY"&&(works.length||value.identity))throw new DouyinOpsRuntimeError("PROTOCOL_ERROR","阻断结果不能夹带账号或作品");
       this.state={epoch:this.epoch,status:value.status,message:value.failure?`${failureStages[value.failure.stage]}：${failureReasons[value.failure.reason]}${value.failure.httpStatus?`（HTTP ${value.failure.httpStatus}）`:""}。本次数据仍未知，不自动重试。`:messages[value.status]!,...(value.failure?{failure:value.failure}:{}),source:value.source,checkedAt:value.checkedAt,...(value.identity?{identity:value.identity}:{}),works,
-        ...(input.operation==="works"&&value.status==="READY"?{worksCheckedAt:value.checkedAt}:{}),coverage:input.operation==="works"&&value.status==="READY"?"FIRST_PAGE_ONLY":"NOT_READ"};
+        ...(input.operation==="works"&&value.status==="READY"?{worksCheckedAt:value.checkedAt,worksReadMethod:"PAGE_RESPONSE" as const}:{}),coverage:input.operation==="works"&&value.status==="READY"?"FIRST_PAGE_ONLY":"NOT_READ"};
       return this.peek();
     }catch(error){this.state={epoch:this.epoch,status:"SESSION_EXPIRED",message:messages.SESSION_EXPIRED!,source:this.state.source,works:[],coverage:"NOT_READ"};throw error;}
     finally{this.busy=false;}
