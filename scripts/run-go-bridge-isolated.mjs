@@ -16,7 +16,7 @@ async function run(executable,argv,label,cwd=root){return new Promise((resolve,r
 const digest=file=>createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex');
 let sourceHashes={};
 try {
- sourceHashes=Object.fromEntries(['execution/go-ego-bridge/main.go','execution/go-ego-bridge/worker.mjs','execution/go-ego-bridge/lifetime_windows.go','execution/go-ego-bridge/lifetime_other.go','src/application/services/agent-cycle-service.ts','src/web/agent-cycle-http.ts','src/web/agent-cycle-ui.ts','tests/go-bridge-business-fixture.ts','tests/go-bridge-lifecycle-fixture.ts','tests/go-ego-bridge-isolated.test.mjs','scripts/run-go-bridge-isolated.mjs','scripts/isolation-guard.mjs'].map(file=>[file,digest(file)]));
+ sourceHashes=Object.fromEntries(['execution/go-ego-bridge/main.go','execution/go-ego-bridge/worker.mjs','execution/go-ego-bridge/lifetime_windows.go','execution/go-ego-bridge/lifetime_other.go','execution/go-ego-bridge/ops.go','execution/go-ego-bridge/ops-worker.mjs','src/application/services/agent-cycle-service.ts','src/web/agent-cycle-http.ts','src/web/agent-cycle-ui.ts','tests/go-bridge-business-fixture.ts','tests/go-bridge-lifecycle-fixture.ts','tests/go-ego-bridge-isolated.test.mjs','scripts/run-go-bridge-isolated.mjs','scripts/isolation-guard.mjs'].map(file=>[file,digest(file)]));
  fs.writeFileSync(path.join(location.session,'evidence/source-manifest.json'),JSON.stringify({sourceHashes},null,2),{flag:'wx'});
  await run(args[1],['build','-trimpath','-buildvcs=false','-o',env.PVS_GO_TEST_BINARY,'.'],'go-build',path.join(root,'execution/go-ego-bridge'));
  await run(process.execPath,['--test','--test-concurrency=1',path.join(root,'tests/go-ego-bridge-isolated.test.mjs')],'go-bridge-suite');

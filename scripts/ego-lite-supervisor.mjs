@@ -8,6 +8,7 @@ import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {root,confined,assertEnvironment} from './isolation-policy.mjs';
 import {digest,loadInstallation} from './ego-lite-installation.mjs';
+import {createDouyinReadSupervisor} from './ego-lite-douyin-supervisor.mjs';
 
 const terminal=new Set(['succeeded','failed','timed_out','cancelled','rejected']);
 const id=v=>typeof v==='string'&&/^[A-Za-z0-9-]{1,80}$/.test(v);
@@ -23,7 +24,7 @@ function child(exe,args,env,ipc=false,role='application'){
   c.exit=new Promise(resolve=>p.once('close',(code,signal)=>{Object.assign(c,{closed:true,code,signal});resolve(c);}));
   return c;
 }
-export async function startWorkbench({env,installation=loadInstallation()}){
+export async function startWorkbench({env,installation=loadInstallation(),opsFixture}){
   const scope=assertEnvironment(env);
   // Re-read every pin before any application or host process is started.
   if(JSON.stringify(loadInstallation())!==JSON.stringify(installation))throw Error('EGO_LITE_INSTALLATION_CHANGED');
@@ -34,6 +35,8 @@ export async function startWorkbench({env,installation=loadInstallation()}){
   const db=new DatabaseSync(scope.database,{readOnly:true});
   const children=[],events=[],completedScopes=new Set();let active,stopping=false,stopPromise;
   const app=child(process.execPath,[path.join(root,'scripts/serve-ego-lite-child.mjs')],env,true);children.push(app);
+  if(opsFixture){const u=new URL(opsFixture.origin);if(u.protocol!=='http:'||u.hostname!=='127.0.0.1'||!u.port||u.pathname!=='/'||u.search||u.hash||u.username||u.password||!id(opsFixture.nonce))throw Error('LOCAL_OPS_FIXTURE_REQUIRED');}
+  const ops=createDouyinReadSupervisor({env,installation,origin,nonce,fixture:opsFixture}),opsEpoch=fingerprint+':'+nonce,opsScopes=new Set();
   const send=value=>{if(app.p.connected)app.p.send(value,()=>{});};
   function permit(request){
     if(!request||request.op!=='start'||!id(request.id)||!['session-open','session-read'].includes(request.mode)||request.timeoutMs!==10000||!id(request.researchRunId)||!request.scope||!id(request.scope.projectId)||!id(request.scope.cycleId)||!id(request.scope.actionId)||!(/^[a-f0-9]{64}$/.test(request.scope.contextHash)))throw Error('EGO_LITE_REQUEST_DENIED');
@@ -96,6 +99,15 @@ export async function startWorkbench({env,installation=loadInstallation()}){
   }
   app.p.on('message',message=>{
     if(message?.ready){app.ready=true;return;}
+    if(message?.egoOpsCancel){if(id(message.egoOpsCancel.id))ops.cancel(message.egoOpsCancel.id);return;}
+    if(message?.egoOpsRequest){void(async()=>{const r=message.egoOpsRequest;try{
+      if(!r||!id(r.id)||r.epoch!==opsEpoch||!['open','identity','works'].includes(r.operation)||!r.scope||!id(r.scope.projectId)||!id(r.scope.cycleId)||!id(r.scope.actionId)||!(/^[a-f0-9]{64}$/.test(r.scope.contextHash)))throw Error('EGO_OPS_REQUEST_DENIED');
+      const row=db.prepare('SELECT projectId,status,dataJson,leasePid,leaseOwner FROM AgentCycleRecord WHERE id=?').get(r.scope.cycleId);
+      if(!row||row.projectId!==r.scope.projectId||row.status!=='RUNNING'||row.leasePid!==app.p.pid||!row.leaseOwner)throw Error('EGO_OPS_LEASE_DENIED');
+      const cycle=JSON.parse(row.dataJson),a=cycle.actions.find(a=>a.id===r.scope.actionId),key=actionKey(r.scope);
+      if(stopping||!cycle.input.stages.includes('OPERATIONS')||!a||a.status!=='RUNNING'||a.effect!=='HUMAN_DECISION'||a.capabilityId!=='operations.ego-lite-'+r.operation||!a.confirmedAt||a.contextHash!==r.scope.contextHash||a.input.epoch!==opsEpoch||a.localExecution?.phase==='CANCELLING'||a.input.expectedAccountUid!==r.expectedAccountUid||a.input.count!==r.count||opsScopes.has(key)||opsScopes.size>=256)throw Error('EGO_OPS_ACTION_DENIED');
+      opsScopes.add(key);const reply=await ops.execute(r);send({egoOpsReply:{id:r.id,reply}});
+    }catch(error){send({egoOpsReply:{id:r?.id,error:/^EGO_[A-Z_]+$/.test(error.message)?error.message:'EGO_OPS_FAILED'}});}})();return;}
     if(message?.egoLiteRequest){void(async()=>{
       const r=message.egoLiteRequest;
       try{
@@ -113,7 +125,7 @@ export async function startWorkbench({env,installation=loadInstallation()}){
       const own=active&&active.key===actionKey(r.scope)&&active.runId===r.runId;
       void(own?finish():Promise.resolve({workerExited:true,clean:true})).then(receipt=>send({egoLiteFinished:{id:r.id,...receipt}})).catch(error=>send({egoLiteFinishError:{id:r.id,code:error.message}}));}
   });
-  send({egoLiteInit:{sourceUrl,fingerprint}});
+  send({egoLiteInit:{sourceUrl,fingerprint,opsEpoch,opsSource:ops.source}});
   try{
     await until(()=>app.ready||app.closed,'EGO_LITE_APPLICATION_START_TIMEOUT');
     if(app.closed)throw Error('EGO_LITE_APPLICATION_START_FAILED '+app.stderr);
@@ -123,11 +135,12 @@ export async function startWorkbench({env,installation=loadInstallation()}){
   const stop=()=>stopPromise??=(async()=>{
     stopping=true;send({shutdown:true});if(active){active.cancelled=true;for(const requestId of active.pending.keys())active.bridge?.p.stdin.write(JSON.stringify({op:'cancel',id:requestId})+'\n');}
     const cleanup=await finish().catch(error=>({workerExited:false,clean:false,failureCode:error.message}));
-    await until(()=>app.closed,'EGO_LITE_APPLICATION_STOP_TIMEOUT',45000).catch(()=>{app.forced=true;app.p.kill();});await until(()=>app.closed,'EGO_LITE_APPLICATION_KILL_UNCONFIRMED',3000).catch(()=>{});db.close();
-    const record={sourceUrl,events,cleanup,children:children.map(c=>({pid:c.p.pid,role:c.role,closed:c.closed,code:c.code,signal:c.signal,error:c.error,forced:c.forced??false})),status:children.every(c=>c.closed&&c.code===0&&!c.forced)?'CLEAN_OWNED_EXITS':'EXIT_NOT_CLEAN'};
+    await until(()=>app.closed,'EGO_LITE_APPLICATION_STOP_TIMEOUT',45000).catch(()=>{app.forced=true;app.p.kill();});await until(()=>app.closed,'EGO_LITE_APPLICATION_KILL_UNCONFIRMED',3000).catch(()=>{});const opsChildren=await ops.stop();db.close();
+    const recorded=[...children.map(c=>({pid:c.p.pid,role:c.role,closed:c.closed,code:c.code,signal:c.signal,error:c.error,forced:c.forced??false})),...opsChildren];
+    const record={sourceUrl,events,cleanup,children:recorded,status:recorded.every(c=>c.closed&&c.code===0&&!c.forced)?'CLEAN_OWNED_EXITS':'EXIT_NOT_CLEAN'};
     fs.writeFileSync(path.join(session,'receipt.json'),JSON.stringify(record,null,2));return record;
   })();
   app.p.once('close',()=>{if(!stopping)void stop().catch(()=>{});});
-  const snapshot=()=>({events:[...events],children:children.map(c=>({pid:c.p.pid,role:c.role,closed:c.closed,code:c.code})),active:active?{dir:active.dir}:null});
+  const snapshot=()=>({events:[...events],children:[...children.map(c=>({pid:c.p.pid,role:c.role,closed:c.closed,code:c.code})),...ops.snapshot().children],active:active?{dir:active.dir}:null,ops:ops.snapshot()});
   return {origin,sourceUrl,session,stop,application:app,events,snapshot};
 }

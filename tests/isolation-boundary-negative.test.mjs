@@ -108,7 +108,7 @@ test('isolated boundary: fail closed before production paths, transports, tasks 
       assert.equal(failure.code,'ENOENT');assert.ok(failure.reason.includes(missingGo),failure.reason);
       if(runner==='run-go-bridge-isolated.mjs'){
         const manifest=JSON.parse(fs.readFileSync(path.join(attempt.session,'evidence/source-manifest.json'),'utf8'));
-        assert.equal(Object.keys(failure.sourceHashes).length,12);assert.deepEqual(failure.sourceHashes,manifest.sourceHashes);
+        assert.equal(Object.keys(failure.sourceHashes).length,14);assert.deepEqual(failure.sourceHashes,manifest.sourceHashes);
         const guardSource=fs.readFileSync(path.join(relocated,'execution/go-ego-bridge/lifetime_windows.go'));
         assert.equal(failure.sourceHashes['execution/go-ego-bridge/lifetime_windows.go'],createHash('sha256').update(guardSource).digest('hex'));
       }

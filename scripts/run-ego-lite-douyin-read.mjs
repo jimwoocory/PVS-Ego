@@ -1,0 +1,20 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {spawn} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
+import {root,confined} from './isolation-policy.mjs';
+import {loadInstallation,digest} from './ego-lite-installation.mjs';
+if(process.argv.length!==2)throw Error('ONE_FIXED_DOUYIN_READ_SUITE_ONLY');loadInstallation();
+const session=confined(path.join(root,'.runtime/isolation-sessions','ego-douyin-read-'+randomUUID()));fs.mkdirSync(path.join(session,'evidence'),{recursive:true});
+fs.writeFileSync(path.join(root,'.runtime/ego-douyin-read-active.json'),JSON.stringify({session}));
+const env={};for(const k of ['SystemRoot','WINDIR','COMSPEC','PATHEXT'])if(process.env[k])env[k]=process.env[k];Object.assign(env,{PATH:path.dirname(process.execPath),HOME:session,USERPROFILE:session,TEMP:session,TMP:session,PVS_READ_TEST_SESSION:session});
+const files=['execution/go-ego-bridge/main.go','execution/go-ego-bridge/ops.go','execution/go-ego-bridge/ops-worker.mjs','execution/go-ego-bridge/lifetime_windows.go','scripts/ego-lite-installation.mjs','scripts/ego-lite-supervisor.mjs','scripts/ego-lite-douyin-supervisor.mjs','scripts/ego-lite-douyin-policy.mjs','scripts/serve-ego-lite-child.mjs','scripts/run-ego-lite-douyin-read.mjs','src/adapters/douyin/ego-lite-douyin-read-runtime.ts','src/application/ports/ego-lite-douyin-read.ts','src/application/services/pvs-agent-capabilities.ts','src/application/services/agent-cycle-service.ts','src/application/services/douyin-account-binding-service.ts','src/web/server.ts','src/web/douyin-ops-http.ts','src/web/ego-lite-douyin-ui.ts','tests/ego-lite-douyin-read.test.mjs','tests/support/ego-lite-douyin-supervisor.mjs','scripts/isolation-guard.mjs'];
+const sourceHashes=Object.fromEntries(files.map(file=>[file,digest(path.join(root,file))]));fs.writeFileSync(path.join(session,'evidence/source-manifest.json'),JSON.stringify({sourceHashes}));
+const child=spawn(process.execPath,['--test','--test-concurrency=1',path.join(root,'tests/ego-lite-douyin-read.test.mjs')],{cwd:root,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
+const log=fs.createWriteStream(path.join(session,'evidence/suite.log'),{flags:'wx'});child.stdout.on('data',b=>{log.write(b);process.stdout.write(b);});child.stderr.on('data',b=>{log.write(b);process.stderr.write(b);});child.once('error',e=>{process.exitCode=1;fs.writeFileSync(path.join(session,'evidence/runner-error.json'),JSON.stringify({code:e.code}));});
+child.once('close',(code,signal)=>{log.end();fs.writeFileSync(path.join(session,'evidence/suite-exit.json'),JSON.stringify({code,signal}));if(code!==0){process.exitCode=code??1;return;}
+ const result=JSON.parse(fs.readFileSync(path.join(session,'evidence/assertions.json'),'utf8'));
+ if(!result.receipts.every(r=>r.children.every(c=>c.closed&&c.code===0&&!c.forced)))throw Error('OWNED_EXITS_NOT_CLEAN');
+ for(const [file,sha]of Object.entries(sourceHashes))if(digest(path.join(root,file))!==sha)throw Error('SOURCE_CHANGED_DURING_SUITE');
+ fs.writeFileSync(path.join(session,'evidence/final-acceptance.json'),JSON.stringify({...result,status:'PASS_ACTUAL_EGO_SYNTHETIC_DOUYIN_READ_CONTRACT',sourceHashes,suiteExitCode:0},null,2),{flag:'wx'});
+});

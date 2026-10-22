@@ -1,5 +1,6 @@
 import "../isolation/require-isolation.js";
 import {deniedPort} from "../isolation/denied-port.js";
+import type {EgoLiteDouyinReadPort} from "../application/ports/ego-lite-douyin-read.js";
 import http from "node:http";
 import {AsyncLocalStorage} from "node:async_hooks";
 import { installChineseResponse, validationMessage } from "./chinese-response.js";
@@ -207,6 +208,7 @@ import type {
 
 export type WebDependencies = {
   egoLite?: {sourceUrl:string};
+  egoLiteDouyinRead?:EgoLiteDouyinReadPort;
   agentCycles?: AgentCycleService;
   douyinCollection?: DouyinCollectionService;
   douyinSchedules?: DouyinOperationsScheduleService;
@@ -257,7 +259,7 @@ export type WebDependencies = {
   provider: DomesticJimengCliProvider;
 };
 
-export function createDefaultDependencies(options: {egoLiteSourceUrl?:string;egoLiteReadSource?: (input:{source:WebResearchSource;projectId:string;runId:string;action:AgentCapabilityContext})=>Promise<WebResearchDocument>} = {}): WebDependencies {
+export function createDefaultDependencies(options: {egoLiteDouyinRead?:EgoLiteDouyinReadPort;egoLiteSourceUrl?:string;egoLiteReadSource?: (input:{source:WebResearchSource;projectId:string;runId:string;action:AgentCapabilityContext})=>Promise<WebResearchDocument>} = {}): WebDependencies {
   const artifacts = new PrismaArtifactRepository(prisma);
   const generation = new PrismaGenerationRepository(prisma);
   const workflow = new PrismaWorkflowRepository(prisma);
@@ -505,10 +507,10 @@ export function createDefaultDependencies(options: {egoLiteSourceUrl?:string;ego
   const douyinProvider = deniedPort<OfficialDouyinOpenApiProvider>("OFFICIAL_PUBLISH");
   const douyinBrowserRuntime = deniedPort<SocialAutoUploadRuntime>("UPLOAD_PUBLISH");
   const douyinOpsRepo = new PrismaDouyinOpsRepository(prisma);
-  const douyinOpsRuntime = deniedPort<YhtDouyinOpsRuntime>("DOUYIN_OPS");
+  const douyinOpsRuntime = options.egoLiteDouyinRead??deniedPort<YhtDouyinOpsRuntime>("DOUYIN_OPS");
   const douyinAccountBinding = new DouyinAccountBindingService(
     douyinBrowserRuntime,
-    douyinOpsRuntime
+    douyinOpsRuntime,Boolean(options.egoLiteDouyinRead)
   );
   const douyinWorkBinding = new DouyinWorkBindingService();
   const douyinMetricService = new DouyinMetricService(
@@ -686,6 +688,7 @@ export function createDefaultDependencies(options: {egoLiteSourceUrl?:string;ego
     publishBridge
   });
   const agentCapabilities = new PvsAgentCapabilities({
+    egoLiteDouyinRead:options.egoLiteDouyinRead,
     ownedEgoLiteSourceUrl:options.egoLiteSourceUrl,
     productFlow,productRepo:productFlowRepo,productInput,research,researchRepo,aiGeneration,smartGeneration,referenceVideo,collections:douyinCollection,
     ...(options.egoLiteReadSource?{collectEgoLiteEvidence:(context:AgentCapabilityContext,input:{goal:string;sourceUrls:Array<{url:string;sourceType:"USER_URL"}>})=>egoLiteAction.run(context,()=>research.startRun({projectId:context.projectId,mode:"BASIC",collectOnly:true,goal:input.goal,sourceUrls:input.sourceUrls,queries:[],marketVideo:{enabled:false}}))}:{}),
@@ -701,8 +704,9 @@ export function createDefaultDependencies(options: {egoLiteSourceUrl?:string;ego
       return {accountId:selected.platformUserId,displayName:selected.accountDisplayName??selected.platformUserId};
     }
   });
-  const agentCycles = new AgentCycleService(new PrismaAgentCycleRepository(prisma),agentCapabilities,aiRuntime,undefined,new Set(options.egoLiteSourceUrl&&options.egoLiteReadSource?["research.collect-evidence"]:[]));
+  const agentCycles = new AgentCycleService(new PrismaAgentCycleRepository(prisma),agentCapabilities,aiRuntime,undefined,new Set([...(options.egoLiteSourceUrl&&options.egoLiteReadSource?["research.collect-evidence"]:[]),...(options.egoLiteDouyinRead?["operations.ego-lite-open","operations.ego-lite-identity","operations.ego-lite-works"]:[])]));
   const dependencies: WebDependencies = {
+    ...(options.egoLiteDouyinRead?{egoLiteDouyinRead:options.egoLiteDouyinRead}:{}),
     ...(options.egoLiteSourceUrl?{egoLite:{sourceUrl:options.egoLiteSourceUrl}}:{}),
     agentCycles,
     douyinCollection,

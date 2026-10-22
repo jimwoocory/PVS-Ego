@@ -5,6 +5,7 @@ import { z } from "zod";
 import {canvasShortPreviewInput} from "../../domain/canvas-short-preview.js";
 import {CanvasShortDeliveryService} from "./canvas-short-delivery.js";
 import type { AgentCapability, AgentCapabilityCatalog, AgentCapabilityContext } from "../ports/agent-capability.js";
+import type {EgoLiteDouyinReadPort,EgoDouyinReadInput} from "../ports/ego-lite-douyin-read.js";
 import type { BusinessStage, CapabilityEffect, CapabilityResult, CycleEvidence } from "../../domain/agent-cycle.js";
 import { hashValue, sha256Bytes } from "../../domain/hashing.js";
 import { DomainValidationError } from "../../domain/validation.js";
@@ -47,6 +48,7 @@ export type PvsAgentCapabilityDependencies = {
   research: ResearchService; researchRepo: ResearchRepository; aiGeneration: AiGenerationService;
   collectEgoLiteEvidence?: (context:AgentCapabilityContext,input:{goal:string;sourceUrls:Array<{url:string;sourceType:"USER_URL"}>})=>Promise<Awaited<ReturnType<ResearchService["startRun"]>>>;
   ownedEgoLiteSourceUrl?: string;
+  egoLiteDouyinRead?:EgoLiteDouyinReadPort;
   smartGeneration: SmartGenerationService; referenceVideo: ReferenceVideoAnalysisService;
   finalOutput: FinalOutputRepository; finalAssembly: FinalAssemblyService; finalQc: FinalQcService; review: ReviewService;
   publishBridge: PublishBridgeService; publishRepo: PublishRepository;
@@ -218,6 +220,17 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
     return binding;
   }
   private install() {
+    for(const operation of ["open","identity","works"] as const){
+      const label={open:"打开独立抖音登录会话",identity:"核验 Ego Lite 当前抖音账号",works:"读取已核验账号的本人作品指标"}[operation];
+      const schema=operation==="works"?z.object({epoch:z.string().min(1).max(120),expectedAccountUid:z.string().regex(/^[1-9]\d{0,39}$/),count:z.number().int().min(1).max(20)}).strict():z.object({epoch:z.string().min(1).max(120)}).strict();
+      this.add({id:"operations.ego-lite-"+operation,title:label,description:"具体确认后通过独立 Ego Lite 执行；只读本人账号/第一页作品，不发布、不回复、不调用模型。",stage:"OPERATIONS",effect:"HUMAN_DECISION",inputSchema:schema,
+        preview:async(projectId,input)=>{const port=this.d.egoLiteDouyinRead;if(!port||port.peek().epoch!==input.epoch)throw new DomainValidationError("当前 Ego Lite 运营会话已变化或未配置，请重新准备");return JSON.stringify({projectId,operation:label,source:port.peek().source,url:port.peek().source==="LIVE_DOUYIN"?"https://www.douyin.com/user/self":"本机合成夹具",...input,limits:"不读取其他账号、不翻页、不发布、不回复；登录与控制归还由用户手动完成"},null,2);},
+        run:async(context,input)=>{const port=this.d.egoLiteDouyinRead;if(!port)throw new DomainValidationError("Ego Lite 运营读取器尚未配置");
+          const value=await port.perform(context,{...input,operation} as EgoDouyinReadInput);
+          const artifact=await this.record(context,"EGO_LITE_DOUYIN_READ",value as unknown as Record<string,unknown>);
+          return answer(label+"："+value.status+"；"+value.message,value,[evidence("OPERATIONS","EGO_LITE_DOUYIN_READ",artifact.id)],"WAITING_USER");}
+      });
+    }
     this.add({ id: "project.inspect", title: "查看当前项目", description: "只读本地事实、任务、作品和已保存成果。", effect: "READ", inputSchema: empty,
       run: async c => answer("当前项目状态", await this.snapshot(c.projectId)) });
     this.add({ id: "project.confirm-truth", title: "确认产品事实", description: "核对具体产品事实、使用规则及产品主图后才能确认。", effect: "HUMAN_DECISION", inputSchema: z.object({ expectedHash: hash,
@@ -637,6 +650,7 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
       feedback,feedbackReadError,artifactReadError, evidenceArtifacts: artifacts.filter(a => a.relativePath.startsWith("agent-evidence/")).map(a => ({ id: a.id, sha256: a.sha256, integrityStatus: a.integrityStatus })) };
   }
   async fingerprint(projectId: string, capabilityId?: string, input?: Record<string, unknown>) {
+    const egoDouyin=capabilityId?.startsWith("operations.ego-lite-")?this.d.egoLiteDouyinRead?.peek():undefined;
     // Authorization depends on business versions, not independent observations.
     // Never probe accounts/platforms, scan research progress or read collection,
     // metric and scheduling checkpoints when checking a user's authorization.
@@ -656,7 +670,7 @@ export class PvsAgentCapabilities implements AgentCapabilityCatalog {
         cid: comment.cid, parentCid: comment.parentCid, contentHash: comment.contentHash, text: comment.text } : null };
     }
     return hashValue({ workspace, ...(capabilityId==="research.collect-evidence"?{egoLiteSourceUrl:this.d.ownedEgoLiteSourceUrl}:{}), production: runs.map(run => ({ id: run.id, projectId: run.projectId, revision: run.revision })).sort((a, b) => a.id.localeCompare(b.id)), final,
-      publication: { preference, packages: packages.map(p => ({ id: p.id, status: p.status, providerType: p.providerType, title: p.titleDraft, description: p.descriptionDraft,
+      ...(egoDouyin?{egoDouyin:{epoch:egoDouyin.epoch,uid:egoDouyin.identity?.uid,checkedAt:egoDouyin.checkedAt}}:{}),publication: { preference, packages: packages.map(p => ({ id: p.id, status: p.status, providerType: p.providerType, title: p.titleDraft, description: p.descriptionDraft,
         finalAssemblyId: p.finalAssemblyId, finalArtifactId: p.finalArtifactId, finalArtifactHash: p.finalArtifactHash })), receipts }, binding, feedback, reply });
   }
   async validateCompletion(projectId: string, stages: BusinessStage[], supplied: CycleEvidence[]) {

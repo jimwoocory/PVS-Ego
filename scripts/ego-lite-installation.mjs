@@ -5,7 +5,7 @@ import {root,confined} from './isolation-policy.mjs';
 
 export const installationFile=path.join(root,'.runtime/ego-lite-installation.json');
 export const digest=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-export const bridgeSources=['execution/go-ego-bridge/main.go','execution/go-ego-bridge/worker.mjs','execution/go-ego-bridge/lifetime_windows.go','execution/go-ego-bridge/lifetime_other.go'];
+export const bridgeSources=['execution/go-ego-bridge/main.go','execution/go-ego-bridge/worker.mjs','execution/go-ego-bridge/lifetime_windows.go','execution/go-ego-bridge/lifetime_other.go','execution/go-ego-bridge/ops.go','execution/go-ego-bridge/ops-worker.mjs'];
 export function localFile(file){
   if(typeof file!=='string'||!path.isAbsolute(file)||fs.realpathSync(file)!==file||!fs.lstatSync(file).isFile()||fs.statSync(file).nlink!==1)throw Error('EGO_LITE_PHYSICAL_FILE_REQUIRED');
   return file;

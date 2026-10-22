@@ -516,6 +516,9 @@ func (b *bridge) serve(input io.Reader) error {
 }
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "--ops-config" {
+		os.Exit(opsMain(os.Args[2]))
+	}
 	file := flag.String("config", "", "explicit local config")
 	flag.Parse()
 	if flag.NArg() != 0 || *file == "" {

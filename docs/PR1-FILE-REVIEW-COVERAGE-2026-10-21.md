@@ -1,8 +1,8 @@
 # PR #1 逐文件审查覆盖清单
 
-审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录代替文件**。C1/C2/C3各新增3项，C4再新增8项，C5新增CI workflow及首次进入PR差异的原边界套件共2项，C8新增本地测试说明1项，C9新增定向运行器与两个测试文件3项，C10新增7项，C11新增8项，本轮待提交公开范围为 **151 项**。新增项在末表单独列出，已修改的原文件仍计入原113项；提交后再核对GitHub集合。
+审查日期：2026-10-21。起始 head 为 `54bbf88b60d93653c3eafbfac6281c291dcae636`，base 为 `67fcac5e5e65183c014a10bfbabfd40a53f7e900`。GitHub 与本地起始集合完全一致：**113 项，无遗漏、重复或以目录代替文件**。C1/C2/C3各新增3项，C4再新增8项，C5新增CI workflow及首次进入PR差异的原边界套件共2项，C8新增本地测试说明1项，C9新增定向运行器与两个测试文件3项，C10新增7项，C11新增8项，C13新增12项，本轮待提交公开范围为 **163 项**。新增项在末表单独列出，已修改的原文件仍计入原113项；提交后再核对GitHub集合。
 
-这是指定深度的静态审查与证据索引，**不是151个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。worker运行证据以C4为准；后续专项均分轮单独运行，不能拼接成完整平台E2E。C5另有全新独立审查者静态复核，范围与限制见末表及分轮记录。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
+这是指定深度的静态审查与证据索引，**不是163个文件的全部路径测试通过证明，也不是独立 GitHub 审核批准**。生产文件按差异与关键调用链复核；旧测试按结构、隔离边界、断言主题与证据声明复核，没有逐条重新证明全部测试断言。worker运行证据以C4为准；后续专项均分轮单独运行，不能拼接成完整平台E2E。C5另有全新独立审查者静态复核，范围与限制见末表及分轮记录。未报告其他已确认且未修复的代码发现，不等于保证无缺陷。
 
 ## C1 前轮补漏与限定运行证据
 
@@ -315,11 +315,32 @@ Tabbit创建标签时协议拒绝，未执行页面操作，空闲空任务已�
 
 2026-10-22唯一`test:go-bridge`最终7 PASS/2 FAIL、退出1，构建及Go编译退出0。实际Go/CLI/SDK/新宿主与内存业务仓库的7个非UI子项通过，4类记录的自有子进程退出0。原生UI被自动审批拒绝，其子项及父项失败，无最终PASS；不把本轮称完整通过。019运行器补存12源码摘要及失败快照，Go桥测试断言/业务/Go保护/原守卫未改。先前同样阻断7/2保留，不累计。边界测试的搬移夹具补齐源码目录及缺编译器摘要核验，修复首个C12 CI25/2揭示的F17；本地没有运行边界套件，最新CI另查。公开集合仍151项。详情见[C12记录](PUBLIC-CHANGE-REVIEW-2026-10-21.md#pr-1-c12-新增进程保护后的-go-桥重验)。
 
+## C13 抖音账号与本人作品只读接线
+
+2026-10-22按本轮具体授权新增运营登录会话及账号/作品固定读取，继续使用原Agent人工确认、租约、取消和不可变证据。唯一`test:ego-lite-douyin-read`最终15/15、退出0，但平台响应全部为合成；17个记录子进程退出0，32捕获PID消失，21源码摘要匹配。取消终态与导航失败绑定修复后只复跑同一套件；用户控制分支为固定合约记录，不算真人归还。本机首轮真实导航PROVIDER_ERROR、无账号/作品，真实接通仍待验收。163项清单是审查范围，不是163项测试全部通过。
+
+原server/能力目录/账户服务/HTTP/父子进程/Go主入口等按差异复核；原守卫不变，旧Go摘要扩至14项，边界CI断言同步。本轮新增12个PR差异路径，其中账号服务此前已存在但首次进入本PR；公开说明加入精确白名单，私有配置/账号/profile/原始证据不公开。
+
+| 编号 | 文件 | 复核深度 | 审查焦点与结果 | 关联运行证据 |
+| --- | --- | --- | --- | --- |
+| N39 | [execution/go-ego-bridge/ops-worker.mjs](../execution/go-ego-bridge/ops-worker.mjs) | 固定SDK程序 | 只读本人身份/第一页，UID前后核对，缺失不补零，控制检查，不自动接管/重试 | C13合成响应 |
+| N40 | [execution/go-ego-bridge/ops.go](../execution/go-ego-bridge/ops.go) | 单次Go程序/退出 | 严格配置/固定操作/摘要，20秒上限、EOF取消、Job保护、退出后回执 | C13实际Go |
+| N41 | [scripts/ego-lite-douyin-policy.mjs](../scripts/ego-lite-douyin-policy.mjs) | 网络策略 | 固定GET、明确登录域/路径，写/伪装域/下载拒绝；不是通用OS沙箱 | C13策略断言/宿主 |
+| N42 | [scripts/ego-lite-douyin-supervisor.mjs](../scripts/ego-lite-douyin-supervisor.mjs) | 独立宿主生命周期 | 新独占profile/受控复用、固定绑定、取消和有界退出；旧许可不恢复 | C13 |
+| N43 | [scripts/run-ego-lite-douyin-read.mjs](../scripts/run-ego-lite-douyin-read.mjs) | 单一套件及最终回执 | 新空库会话、执行前21源码SHA、进程实际退出与源码未变后才写PASS | C13 15/15 |
+| N44 | [src/adapters/douyin/ego-lite-douyin-read-runtime.ts](../src/adapters/douyin/ego-lite-douyin-read-runtime.ts) | 数据契约/缓存边界 | 实际UID/作者/指标校验，清空失败旧值，GET不采集，缓存不能冒充新采集 | C13 |
+| N45 | [src/application/ports/ego-lite-douyin-read.ts](../src/application/ports/ego-lite-douyin-read.ts) | 只读端口 | 会话代次、来源、具体操作/UID/上限，区分未读取和第一页 | 编译/C13 |
+| N46 | [src/application/services/douyin-account-binding-service.ts](../src/application/services/douyin-account-binding-service.ts) | 首次进入PR差异 | 只读运营可独立显示；发布匹配UNKNOWN/自动绑定false，原模式不变 | C13接线；旧模式本轮未跑 |
+| N47 | [src/web/ego-lite-douyin-ui.ts](../src/web/ego-lite-douyin-ui.ts) | HTML/提案路径 | 三个准备按钮只提案，原Agent确认，时间/来源/未知回显、转义，无写入口 | C13 HTTP；原生视觉未验 |
+| N48 | [tests/ego-lite-douyin-read.test.mjs](../tests/ego-lite-douyin-read.test.mjs) | 实际宿主/Prisma/HTTP专项 | 合成平台响应，账号切换/取消/失败/重启，真实平台与真人控制不计PASS | C13 15/15 |
+| N49 | [tests/support/ego-lite-douyin-supervisor.mjs](../tests/support/ego-lite-douyin-supervisor.mjs) | 可信测试控制器 | 包装同一生产启动/停止，固定本机fixture，真实子进程退出 | C13 |
+| N50 | [docs/EGO-LITE-DOUYIN-READ-2026-10-22.md](../docs/EGO-LITE-DOUYIN-READ-2026-10-22.md) | 接入/人工操作与限制 | 明确本轮授权、人工登录归还、合成/真实区别及导航失败 | C13交接 |
+
 ## 明确剩余未验收项
 
 | 编号 | 尚缺证据 | 当前边界与下一步 |
 | --- | --- | --- |
-| R1 | 普通网站与真实账号接线、完整OS进程树审计 | C11实际断连/监督关闭/强杀/超时组合9/9，捕获自有PID均消失；Go自有Job及宿主心跳，不宣称任意进程树或远端回滚。仅固定合成页面，旧profile/许可不恢复 |
+| R1 | 真实抖音账号/数据、普通网站扩展与完整OS审计 | C13接入固定只读传输和原确认，但首轮真实导航PROVIDER_ERROR，未取得账号/作品；15/15为实际宿主+合成响应。研究仍限nonce页；C11退出组合9/9是历史，旧许可不恢复 |
 | R2 | 小时/天级浸泡、更大规模/真实负载/性能SLO与真实设备故障 | C4补15分钟、千条积压、MANAGED/Agent公平扫描及本地SQLite/文件错误；ALL索引独立运行、万级任务、设备EIO/ENOSPC/断电等仍缺。C3自然TTL/重启为历史，stop不强制取消当前一步 |
 | R3 | 共享指标之外的当前组合回归及工作台原生点击/截图视觉 | C10实际宿主/Prisma/HTTP7/7与真实合成页PNG通过，但浏览器URL策略拒绝工作台读取，原生确认仍BLOCKED；C9输入超时和C2指标切片23项/截图BLOCKED分别保留 |
 | R4 | U1 真人登录/验证码后归还原会话 | 固定自有页成功不证明真人归还；账号与实际验证由用户处理，旧句柄/权限不自动恢复 |

@@ -4,13 +4,14 @@ import './isolation-guard.mjs';
 import {randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-const pending=new Map(),finishes=new Map();let launch,server,dbClient,deps,closing=false;
+const pending=new Map(),finishes=new Map(),opsPending=new Map();let launch,server,dbClient,deps,closing=false;
 let shutdownPhase='RUNNING';
 const diagnostic=extra=>{try{fs.writeFileSync(path.join(process.env.TMP,'ego-lite-child-shutdown.json'),JSON.stringify({phase:shutdownPhase,...extra}));}catch{}};
 process.on('uncaughtExceptionMonitor',error=>diagnostic({error:error.message,stack:error.stack}));
 process.once('exit',code=>diagnostic({exitCode:code}));
 process.on('message',message=>{
   if(message?.egoLiteInit&&!launch){launch=message.egoLiteInit;return;}
+  if(message?.egoOpsReply){const r=message.egoOpsReply,p=opsPending.get(r.id);if(p){opsPending.delete(r.id);p.cleanup();r.error?p.reject(Error(r.error)):p.resolve(r.reply);}return;}
   if(message?.egoLiteEvent){const e=message.egoLiteEvent,p=pending.get(e.id);if(!p)return;p.events.push(e);if(e.type==='connected')p.context.localExecution?.report({phase:'CONNECTED',samples:0,workerExited:false});
     if(['succeeded','failed','timed_out','cancelled','rejected'].includes(e.type)){pending.delete(e.id);p.cleanup();p.resolve(p.events);}return;}
   if(message?.egoLiteError){const e=message.egoLiteError,p=pending.get(e.id);if(p){pending.delete(e.id);p.cleanup();p.reject(Error(e.code));}return;}
@@ -29,13 +30,22 @@ dbClient=prisma;
 const {GoOwnedEgoResearchRuntime}=await import('../dist/src/adapters/research/go-owned-ego-research-runtime.js');
 const {EgoBrowserResearchProvider}=await import('../dist/src/adapters/research/ego-browser-research-provider.js');
 const {BrowserResearchBlockedError}=await import('../dist/src/application/ports/research-provider.js');
+const {EgoLiteDouyinReadRuntime}=await import('../dist/src/adapters/douyin/ego-lite-douyin-read-runtime.js');
 const u=new URL(launch.sourceUrl);
 if(u.origin!=='http://127.0.0.1:'+process.env.PORT||!/^\/bridge-fixture\/[a-f0-9-]{36}$/.test(u.pathname)||!(/^[a-f0-9]{64}$/.test(launch.fingerprint)))throw Error('EGO_LITE_LAUNCH_DENIED');
 const finish=(scope,runId)=>new Promise((resolve,reject)=>{
   if(!process.connected){reject(Error('EGO_LITE_SUPERVISOR_DISCONNECTED'));return;}
   const id=randomUUID(),timer=setTimeout(()=>{finishes.delete(id);reject(Error('EGO_LITE_FINISH_TIMEOUT'));},35000);finishes.set(id,{resolve,reject,timer});send({egoLiteFinish:{id,scope,runId}});
 });
-deps=createDefaultDependencies({egoLiteSourceUrl:launch.sourceUrl,egoLiteReadSource:async({source,projectId,runId,action})=>{
+const opsRuntime=new EgoLiteDouyinReadRuntime(launch.opsEpoch,(context,input)=>new Promise((resolve,reject)=>{
+  if(!context.localExecution||context.localExecution.signal.aborted||!process.connected){reject(Error('EGO_OPS_ACTION_CANCELLED'));return;}
+  const id=randomUUID(),cancel=()=>{if(process.connected)send({egoOpsCancel:{id}});};
+  const timer=setTimeout(()=>{opsPending.delete(id);cancel();cleanup();reject(Error('EGO_OPS_TIMEOUT'));},65000);
+  const cleanup=()=>{clearTimeout(timer);context.localExecution.signal.removeEventListener('abort',cancel);};
+  opsPending.set(id,{resolve,reject,cleanup});context.localExecution.signal.addEventListener('abort',cancel,{once:true});
+  void deps.agentCycles.get(context.projectId,context.cycleId).then(cycle=>{const action=cycle?.actions.find(a=>a.id===context.actionId);if(!action||action.status!=='RUNNING'||!action.confirmedAt)throw Error('EGO_OPS_ACTION_CHANGED');send({egoOpsRequest:{id,...input,scope:{projectId:context.projectId,cycleId:context.cycleId,actionId:context.actionId,contextHash:action.contextHash}}});}).catch(error=>{opsPending.delete(id);cleanup();reject(error);});
+}),launch.opsSource);
+deps=createDefaultDependencies({egoLiteDouyinRead:opsRuntime,egoLiteSourceUrl:launch.sourceUrl,egoLiteReadSource:async({source,projectId,runId,action})=>{
   if(source.url!==launch.sourceUrl||!action.confirmed||!action.localExecution)throw Error('EGO_LITE_CONFIRMED_LOCAL_ACTION_REQUIRED');
   const cycle=await deps.agentCycles.get(projectId,action.cycleId),a=cycle?.actions.find(a=>a.id===action.actionId);
   if(!a||cycle.status!=='RUNNING'||a.status!=='RUNNING'||!a.confirmedAt)throw Error('EGO_LITE_ACTION_CHANGED');
@@ -72,6 +82,7 @@ async function close(){if(closing)return;closing=true;
   try{
   const closed=server?new Promise(resolve=>server.close(resolve)):Promise.resolve();
   if(!process.connected){
+    for(const p of opsPending.values()){p.cleanup();p.reject(Error('EGO_LITE_SUPERVISOR_DISCONNECTED'));}opsPending.clear();
     for(const p of pending.values()){p.cleanup();p.reject(Error('EGO_LITE_SUPERVISOR_DISCONNECTED'));}pending.clear();
     for(const p of finishes.values()){clearTimeout(p.timer);p.reject(Error('EGO_LITE_SUPERVISOR_DISCONNECTED'));}finishes.clear();
   }

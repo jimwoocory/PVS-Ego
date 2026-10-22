@@ -40,7 +40,8 @@
     "test:pr1-local-ui": "node scripts/run-pr1-local-ui.mjs",
     "ego:configure": "node scripts/configure-ego-lite.mjs",
     "test:ego-lite-workbench": "node scripts/run-ego-lite-workbench.mjs",
-    "test:ego-lite-lifecycle": "node scripts/run-ego-lite-lifecycle.mjs"
+    "test:ego-lite-lifecycle": "node scripts/run-ego-lite-lifecycle.mjs",
+    "test:ego-lite-douyin-read": "node scripts/run-ego-lite-douyin-read.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",
