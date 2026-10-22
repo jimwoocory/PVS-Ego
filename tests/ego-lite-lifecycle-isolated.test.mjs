@@ -33,11 +33,12 @@ test('actual owned Ego host disconnect, supervisor shutdown and timeout combinat
   c.project=previous?.project??(await c.request('POST','/api/projects',{name:'Synthetic lifecycle '+name,targetDurationMs:15000})).value.project;
   c.base='/api/projects/'+c.project.id+'/agent-cycles';
   c.readCycle=()=>JSON.parse(db.prepare('SELECT dataJson FROM AgentCycleRecord WHERE id=?').get(c.cycle.id).dataJson);
-  c.start=async()=>{
+  c.start=async({waitForWorker=true}={})=>{
    let cycle=await c.post(c.base,{goal:'Only synthetic local lifecycle '+name,requestKey:randomUUID(),stages:['RESEARCH']});
    cycle=await c.post(c.base+'/'+cycle.id+'/invoke',{capabilityId:'research.collect-evidence',arguments:{goal:'Only synthetic local lifecycle '+name,sourceUrls:[{url:c.ready.sourceUrl,sourceType:'USER_URL'}]},requestKey:randomUUID()});
    c.cycle=await c.post(c.base+'/'+cycle.id+'/confirm',{expectedRevision:cycle.revision,actionId:cycle.actions[0].id,inputHash:cycle.actions[0].inputHash});
    c.advance=c.post(c.base+'/'+cycle.id+'/advance',{}).then(value=>({value}),error=>({error:error.message}));
+   if(!waitForWorker)return;
    const state=await until(async()=>{const s=await c.rpc('snapshot');if(!s.events.length&&c.readCycle().actions[0].status==='FAILED')throw Error('EARLY_ACTION_FAILURE '+JSON.stringify(c.readCycle().actions[0]));return s;},s=>s.events.some(e=>e.type==='started'),'actual Go started');await remember(c,state);return state;
   };
   c.arm=async()=>{
@@ -73,12 +74,36 @@ test('actual owned Ego host disconnect, supervisor shutdown and timeout combinat
  const finishAction=async c=>{const result=await c.advance;assert.ok(result.value,result.error);return result.value;};
  const evidenceCount=c=>c.db.prepare('SELECT COUNT(*) AS n FROM ResearchEvidenceRecord').get().n;
  const terminalEvents=s=>s.events.filter(e=>['succeeded','failed','timed_out','cancelled','rejected'].includes(e.type));
- await check('normal real capture remains usable and isolated Douyin page renders an explicit blocked HTML state',async()=>{
+ await check('normal capture remains usable and Douyin GET only shows an unconnected read-only snapshot',async()=>{
   const c=await open('normal-and-ops');
-  for(const url of ['/douyin-ops','/projects/'+c.project.id+'/douyin']){const r=await c.request('GET',url);assert.equal(r.status,503,r.text);assert.ok(r.type.includes('text/html'));assert.ok(r.text.includes('抖音运营尚未接入'));assert.ok(r.text.includes('账号状态：未核验'));assert.ok(r.text.includes('返回项目工作台'));assert.ok(!r.text.includes('DOUYIN_OPS_FAILED'));assert.ok(!r.text.includes('id="launch-ops"'));}
-  const status=await c.request('GET','/api/douyin/ops/status');assert.equal(status.status,503);assert.equal(status.value.code,'DOUYIN_OPS_EXECUTION_DISABLED');
-  const launch=await c.request('POST','/api/douyin/ops/launch',{});assert.equal(launch.status,503);assert.equal(launch.value.code,'DOUYIN_OPS_EXECUTION_DISABLED');
+  for(const url of ['/douyin-ops','/projects/'+c.project.id+'/douyin']){const r=await c.request('GET',url);assert.equal(r.status,200);assert.ok(r.type.includes('text/html'));assert.ok(r.text.includes('Ego Lite 抖音只读运营'));assert.ok(r.text.includes('NOT_CONNECTED'));assert.ok(r.text.includes('尚未核验'));assert.ok(r.text.includes('返回项目工作台'));assert.ok(!r.text.includes('DOUYIN_OPS_FAILED'));assert.ok(!r.text.includes('id="launch-ops"'));}
+  const status=await c.request('GET','/api/douyin/ops/status');assert.equal(status.status,200);assert.equal(status.value.status,'NOT_CONNECTED');assert.equal(status.value.identity,undefined);assert.equal(status.value.coverage,'NOT_READ');assert.deepEqual(status.value.works,[]);
+  const launch=await c.request('POST','/api/douyin/ops/launch',{});assert.equal(launch.status,403);assert.equal(launch.value.code,'EGO_DOUYIN_READ_ONLY');
+  const idle=await c.rpc('snapshot');assert.equal(idle.events.length,0);assert.equal(idle.children.length,1);assert.equal(idle.active,null);assert.equal(idle.ops.children.length,0);
   await c.start();const result=await finishAction(c);assert.equal(result.status,'WAITING_USER');assert.equal(result.actions[0].localExecution.phase,'SUCCEEDED');assert.equal(evidenceCount(c),1);await remember(c,await c.rpc('snapshot'));await stop(c);record(c);baseline=c;
+ });
+ await check('graceful shutdown while asynchronous pin reads are held starts no late host or worker',async()=>{
+  const c=await open('pin-graceful-stop');await c.rpc('hold-pins');await c.start({waitForWorker:false});
+  const held=await until(()=>c.rpc('snapshot'),s=>s.pinVerification?.held,'actual asynchronous pin read held');await remember(c,held);
+  assert.equal(held.children.length,1);assert.equal(held.events.length,0);assert.ok(held.active);c.pinBefore=held.pinVerification;
+  const stopping=c.rpc('stop');await c.rpc('release-pins');c.receipt=await stopping;await c.exit;
+  assert.equal(c.code,0,c.errors);assert.ok(c.receipt.children.every(ch=>ch.role==='application'&&ch.closed&&ch.code===0&&!ch.forced));assert.equal(c.receipt.events.length,0);
+  assert.equal(c.receipt.pinVerification.files,30);assert.equal(c.receipt.pinVerification.complete,30);
+  const done=await finishAction(c);assert.equal(done.status,'CANCELLED');assert.equal(done.actions[0].localExecution.workerExited,true);assert.equal(evidenceCount(c),0);
+  assert.equal(c.db.prepare('SELECT leaseOwner FROM AgentCycleRecord WHERE id=?').get(c.cycle.id).leaseOwner,null);
+  await until(()=>[...c.knownPids].filter(alive),pids=>!pids.length,'pin stop owned PIDs gone');record(c);
+ });
+ await check('abrupt supervisor death during pin initialization creates no host and cannot revive old permission',async()=>{
+  const c=await open('pin-abrupt-stop');await c.rpc('hold-pins');await c.start({waitForWorker:false});
+  const held=await until(()=>c.rpc('snapshot'),s=>s.pinVerification?.held,'pin read held before supervisor death');await remember(c,held);
+  assert.equal(held.children.length,1);assert.equal(held.events.length,0);c.pinBefore=held.pinVerification;
+  c.p.kill();await c.exit;assert.notEqual(c.code,0);await c.advance;
+  await until(()=>[...c.knownPids].filter(alive),pids=>!pids.length,'pin abrupt owned EOF shutdown',20000);
+  assert.ok(!fs.existsSync(path.join(c.actionDirectory,'host.mjs')));assert.ok(!fs.existsSync(path.join(c.actionDirectory,'config.json')));
+  const old=c.readCycle();assert.ok(['RUNNING','BLOCKED'].includes(old.status));assert.equal(old.actions[0].localExecution.workerExited,false);assert.equal(evidenceCount(c),0);record(c);
+  const reopened=await open('pin-abrupt-reopen',c);reopened.cycle=c.cycle;assert.notEqual(reopened.ready.sourceUrl,c.ready.sourceUrl);
+  const done=await reopened.post(reopened.base+'/'+c.cycle.id+'/advance',{});assert.equal(done.status,old.status==='RUNNING'?'OUTCOME_UNKNOWN':'BLOCKED');assert.equal(done.actions[0].localExecution.workerExited,false);
+  assert.equal(reopened.db.prepare('SELECT leaseOwner FROM AgentCycleRecord WHERE id=?').get(c.cycle.id).leaseOwner,null);assert.equal((await reopened.rpc('snapshot')).children.length,1);assert.equal((await reopened.rpc('snapshot')).events.length,0);await stop(reopened);record(reopened);
  });
  await check('startup reconciliation preserves a different live executor lease and never advances ready work',async()=>{
   // Synthetic lease row only: no browser work or claimed outcome for this row.
